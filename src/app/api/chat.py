@@ -28,15 +28,18 @@ def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
         return False
 
     has_metric_alias = any(alias in question for alias in METRIC_ALIASES)
-    has_explicit_scope_or_time = any(
-        token in question for token in ["华东", "华南", "上个月", "近3个月"]
-    )
-    if has_metric_alias and not has_explicit_scope_or_time:
+    has_explicit_scope = any(token in question for token in ["华东", "华南"])
+    has_explicit_time = any(token in question for token in ["上个月", "近3个月"])
+    has_followup_cue = any(token in question for token in ["那", "呢", "按月", "环比", "同比"])
+
+    if has_metric_alias and not has_explicit_scope and not has_explicit_time:
+        return True
+    if has_metric_alias and has_followup_cue and not has_explicit_time:
         return True
     if has_metric_alias:
         return False
 
-    return any(token in question for token in ["华东", "华南", "那", "按月", "环比", "同比"])
+    return has_explicit_scope or has_followup_cue
 
 
 @router.post("/query")
