@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.domain.metrics_catalog import METRIC_ALIASES
+from app.domain.models import ValidationErrorCode
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event, new_trace_id
 from app.services.conversation_memory import apply_followup, get_last_plan, save_last_plan
@@ -29,7 +30,7 @@ def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
     if any(alias in question for alias in METRIC_ALIASES):
         return False
 
-    return any(token in question for token in ["华东", "华南", "那", "按月"])
+    return any(token in question for token in ["华东", "华南", "那", "按月", "环比", "同比"])
 
 
 @router.post("/query")
@@ -43,6 +44,25 @@ def query(req: QueryRequest):
     else:
         intent = parse_intent(req.question)
         plan = build_query_plan(intent)
+
+    if not plan.metric and "指标" not in req.question:
+        append_audit_event(
+            {
+                "trace_id": trace_id,
+                "status": ValidationErrorCode.MISSING_METRIC.value,
+                "question": req.question,
+                "conversation_id": req.conversation_id,
+            }
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error_code": ValidationErrorCode.MISSING_METRIC.value,
+                "message": "请补充要查询的指标",
+                "suggestions": list(METRIC_ALIASES.keys()),
+                "trace_id": trace_id,
+            },
+        )
 
     try:
         validate_plan(plan, allowed_regions=allowed_regions)

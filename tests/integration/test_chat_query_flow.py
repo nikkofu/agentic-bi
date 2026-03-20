@@ -173,6 +173,56 @@ def test_direct_year_over_year_question_returns_compare_answer():
     assert "较去年同期上升4.00个百分点" in body["answer"]
 
 
+def test_followup_month_over_month_question_reuses_previous_metric_and_scope():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-9",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "环比呢",
+        "conversation_id": "c-9",
+    }
+
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区毛利率为32.00%")
+    assert "较前月上升2.50个百分点" in body["answer"]
+
+
+def test_followup_year_over_year_question_reuses_previous_metric_and_scope():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-10",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "同比呢",
+        "conversation_id": "c-10",
+    }
+
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区毛利率为32.00%")
+    assert "较去年同期上升4.00个百分点" in body["answer"]
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",
@@ -183,3 +233,20 @@ def test_unknown_metric_returns_structured_error_code():
     resp = client.post("/v1/chat/query", json=payload)
     assert resp.status_code == 400
     assert resp.json()["error_code"] == "UNKNOWN_METRIC"
+
+
+def test_incomplete_question_returns_metric_clarification():
+    payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区怎么样？",
+        "conversation_id": "c-clarify",
+    }
+
+    resp = client.post("/v1/chat/query", json=payload)
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "MISSING_METRIC"
+    assert body["message"] == "请补充要查询的指标"
+    assert body["suggestions"] == ["毛利率", "销售额"]
