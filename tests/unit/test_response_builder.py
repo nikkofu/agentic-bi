@@ -48,3 +48,26 @@ def test_builder_includes_year_over_year_delta_for_compare_result():
 
     assert payload["answer"].startswith("上个月华东区毛利率为32.00%")
     assert "较去年同期上升4.00个百分点" in payload["answer"]
+
+
+def test_builder_includes_compare_summary_for_time_series_result():
+    from app.services.response_builder import build_response
+
+    result = {
+        "metric": "revenue",
+        "region": "华南",
+        "time_window": "recent_3_months",
+        "series": [
+            {"month": "2025-12", "value": 800},
+            {"month": "2026-01", "value": 850},
+            {"month": "2026-02", "value": 900},
+        ],
+        "compare_to": "prev_year",
+        "compare_value": 780,
+        "delta_value": 120,
+    }
+
+    payload = build_response(result)
+
+    assert payload["answer"].startswith("近3个月华南区销售额按月趋势为")
+    assert "最新月份较去年同期上升120" in payload["answer"]

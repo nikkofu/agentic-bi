@@ -149,12 +149,16 @@ def execute_query(plan, scope):
             compare_to=plan.compare_to,
         )
 
+    comparison_base_value = value
+    if series:
+        comparison_base_value = series[-1]["value"]
+
     return {
         "value": value,
         "metric": metric_key,
         "region": region or "全域",
         "time_window": plan.time_window,
         "series": series,
-        "delta_value": value - comparison["compare_value"] if comparison else None,
+        "delta_value": comparison_base_value - comparison["compare_value"] if comparison else None,
         **comparison,
     }

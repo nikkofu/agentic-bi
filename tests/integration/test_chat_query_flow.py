@@ -272,6 +272,36 @@ def test_combined_followup_reuses_time_and_switches_scope_metric_and_compare_mod
     assert "较去年同期上升120" in body["answer"]
 
 
+def test_combined_followup_can_return_monthly_trend_with_compare_summary():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-13",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "那华南销售额同比按月看",
+        "conversation_id": "c-13",
+    }
+
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("近3个月华南区销售额按月趋势为")
+    assert "最新月份较去年同期上升120" in body["answer"]
+    assert body["chart"]["data"] == [
+        {"month": "2025-12", "value": 800},
+        {"month": "2026-01", "value": 850},
+        {"month": "2026-02", "value": 900},
+    ]
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",

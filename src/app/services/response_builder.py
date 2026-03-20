@@ -56,7 +56,15 @@ def build_response(result: dict) -> dict:
         series_summary = "，".join(
             f"{point['month']} {_format_value(metric, point['value'])}" for point in series
         )
-        answer = f"{time_window_label}{region}区{metric_label}按月趋势为：{series_summary}"
+        compare_fragment = _format_compare_fragment(
+            metric=metric,
+            compare_to=result.get("compare_to", ""),
+            delta_value=result.get("delta_value"),
+        )
+        compare_summary = ""
+        if compare_fragment:
+            compare_summary = f"，最新月份{compare_fragment.lstrip('，')}"
+        answer = f"{time_window_label}{region}区{metric_label}按月趋势为：{series_summary}{compare_summary}"
         chart_data = series
     else:
         value = _format_value(metric, result.get("value", 0))
