@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.services.intent_parser import parse_intent
 from app.services.query_executor import execute_query
 from app.services.query_planner import build_query_plan
+from app.services.response_builder import build_response
 
 router = APIRouter(prefix="/v1/chat")
 
@@ -20,9 +21,8 @@ def query(req: QueryRequest):
     intent = parse_intent(req.question)
     plan = build_query_plan(intent)
     result = execute_query(plan, scope={"allowed_regions": ["华东", "华南"]})
-    answer = f"上个月{result['region']}区毛利率为{result['value']:.2%}"
-    return {
-        "answer": answer,
-        "chart": {"type": "table", "data": [result]},
-        "trace_id": "stub-trace",
-    }
+    result["has_time_series"] = True
+    result["has_rank"] = False
+    payload = build_response(result)
+    payload["trace_id"] = "stub-trace"
+    return payload
