@@ -25,9 +25,11 @@ Phase 2/3 (from RFP) extend toward proactive diagnosis and execution workflows.
 - Natural-language sales intent parsing
 - Query-plan construction and validation
 - Deterministic fixture-backed execution
-- Narrative/chart response building
-- Conversation follow-up memory
-- Audit event logging with trace IDs
+- Narrative/chart response building for scalar answers and monthly trends
+- Direct questions for last-month values, recent-three-month trends, month-over-month comparisons, and year-over-year comparisons
+- Conversation follow-up memory for region switch, monthly trend view, and `环比/同比` follow-up questions
+- Audit event logging with trace IDs and SQLite persistence
+- Minimal clarification responses when the user omits the metric
 
 ## Run
 

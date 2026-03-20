@@ -18,12 +18,15 @@ _Last updated: 2026-03-20_
 5. Phase 1 MVP service scaffold, parsing, planning, validation, execution, response generation, and follow-up memory implemented
 6. Audit logging now persists to SQLite and is covered by integration tests
 7. Python test suite is runnable via `pytest` with repository-local configuration
+8. Direct question coverage now includes scalar answers, recent-three-month trends, month-over-month comparisons, and year-over-year comparisons
+9. Follow-up coverage now includes region switch, monthly trend view, and `环比/同比` comparative follow-ups
+10. Incomplete metric questions now return a minimal clarification response instead of a generic unknown-metric failure
 
 ## What is next
 
-1. Continue hardening Phase 1 conversation coverage and semantic parsing depth
-2. Merge `feature/phase1-sales-copilot` back to `main` when the branch is ready
-3. Prepare the next scoped implementation pass without leaking into Phase 2/3
+1. Continue hardening Phase 1 conversation coverage across more metrics and comparison patterns
+2. Add broader semantic parsing beyond the current rule-based phrases without leaking into free-form SQL generation
+3. Merge `feature/phase1-sales-copilot` back to `main` when the branch is ready
 
 ## Out-of-scope now
 
