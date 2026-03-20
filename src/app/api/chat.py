@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.services.audit_log import append_audit_event, new_trace_id
 from app.services.conversation_memory import apply_followup, get_last_plan, save_last_plan
 from app.services.intent_parser import parse_intent
 from app.services.query_executor import execute_query
@@ -19,6 +20,7 @@ class QueryRequest(BaseModel):
 
 @router.post("/query")
 def query(req: QueryRequest):
+    trace_id = new_trace_id()
     previous_plan = get_last_plan(req.conversation_id)
     if previous_plan and ("华东" in req.question or "华南" in req.question):
         plan = apply_followup(req.question, previous_plan)
@@ -31,5 +33,14 @@ def query(req: QueryRequest):
     result["has_time_series"] = True
     result["has_rank"] = False
     payload = build_response(result)
-    payload["trace_id"] = "stub-trace"
+    payload["trace_id"] = trace_id
+
+    append_audit_event(
+        {
+            "trace_id": trace_id,
+            "status": "SUCCESS",
+            "question": req.question,
+            "conversation_id": req.conversation_id,
+        }
+    )
     return payload
