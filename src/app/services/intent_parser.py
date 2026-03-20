@@ -16,7 +16,12 @@ class ParsedIntent:
 
 
 def parse_intent(question: str) -> ParsedIntent:
-    metric = "gross_margin_rate" if "毛利率" in question else "revenue"
+    metric = ""
+    for alias, canonical in ALIASES.items():
+        if alias in question:
+            metric = canonical
+            break
+
     filters = {"region": "华东"} if "华东" in question else {}
     time_window = "last_month" if "上个月" in question else "current"
     return ParsedIntent(metric=metric, filters=filters, time_window=time_window)

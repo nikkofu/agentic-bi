@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.services.audit_log import append_audit_event, new_trace_id
@@ -6,6 +7,7 @@ from app.services.conversation_memory import apply_followup, get_last_plan, save
 from app.services.intent_parser import parse_intent
 from app.services.query_executor import execute_query
 from app.services.query_planner import build_query_plan
+from app.services.query_validator import validate_plan
 from app.services.response_builder import build_response
 
 router = APIRouter(prefix="/v1/chat")
@@ -27,6 +29,13 @@ def query(req: QueryRequest):
     else:
         intent = parse_intent(req.question)
         plan = build_query_plan(intent)
+
+    try:
+        validate_plan(plan, allowed_regions=["华东", "华南"])
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error_code": str(exc), "message": "invalid metric"})
+    except PermissionError as exc:
+        return JSONResponse(status_code=403, content={"error_code": str(exc), "message": "permission denied"})
 
     save_last_plan(req.conversation_id, plan)
     result = execute_query(plan, scope={"allowed_regions": ["华东", "华南"]})

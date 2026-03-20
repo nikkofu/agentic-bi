@@ -31,3 +31,15 @@ def test_query_returns_value_from_fixture_backend():
     assert resp.status_code == 200
     body = resp.json()
     assert body["answer"].startswith("上个月华东区毛利率")
+
+
+def test_unknown_metric_returns_structured_error_code():
+    payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区未知指标是多少？",
+        "conversation_id": "c-err",
+    }
+    resp = client.post("/v1/chat/query", json=payload)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "UNKNOWN_METRIC"
