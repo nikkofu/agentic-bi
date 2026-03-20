@@ -1,14 +1,17 @@
 [
   {
     "region": "华东",
-    "gross_margin_rate": 0.312
+    "gross_margin_rate": 0.312,
+    "revenue": 1200
   },
   {
     "region": "华南",
-    "gross_margin_rate": 0.287
+    "gross_margin_rate": 0.287,
+    "revenue": 900
   },
   {
     "region": "华东",
-    "gross_margin_rate": 0.328
+    "gross_margin_rate": 0.328,
+    "revenue": 1300
   }
 ]

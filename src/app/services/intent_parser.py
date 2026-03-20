@@ -1,11 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict
 
-
-ALIASES = {
-    "毛利率": "gross_margin_rate",
-    "销售额": "revenue",
-}
+from app.domain.metrics_catalog import METRIC_ALIASES
 
 
 @dataclass
@@ -17,11 +13,16 @@ class ParsedIntent:
 
 def parse_intent(question: str) -> ParsedIntent:
     metric = ""
-    for alias, canonical in ALIASES.items():
+    for alias, canonical in METRIC_ALIASES.items():
         if alias in question:
             metric = canonical
             break
 
-    filters = {"region": "华东"} if "华东" in question else {}
+    filters = {}
+    if "华东" in question:
+        filters["region"] = "华东"
+    elif "华南" in question:
+        filters["region"] = "华南"
+
     time_window = "last_month" if "上个月" in question else "current"
     return ParsedIntent(metric=metric, filters=filters, time_window=time_window)

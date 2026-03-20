@@ -6,3 +6,10 @@ def test_parse_margin_rate_for_region_last_month():
     assert intent.metric == "gross_margin_rate"
     assert intent.filters["region"] == "华东"
     assert intent.time_window == "last_month"
+
+
+def test_parse_margin_rate_for_south_region_last_month():
+    intent = parse_intent("上个月华南区毛利率是多少？")
+    assert intent.metric == "gross_margin_rate"
+    assert intent.filters["region"] == "华南"
+    assert intent.time_window == "last_month"

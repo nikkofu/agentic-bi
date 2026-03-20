@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from app.domain.metrics_catalog import METRIC_AGGREGATIONS
+
 
 def load_sales_fixture() -> list[dict]:
     fixture_path = (
@@ -23,7 +25,26 @@ def execute_query(plan, scope):
         rows = [r for r in rows if r.get("region") in allowed_regions]
 
     if not rows:
-        return {"value": 0.0, "metric": plan.metric, "region": region or "all"}
+        return {
+            "value": 0.0,
+            "metric": plan.metric,
+            "region": region or "全域",
+            "time_window": plan.time_window,
+        }
 
-    value = sum(r.get("gross_margin_rate", 0.0) for r in rows) / len(rows)
-    return {"value": round(value, 4), "metric": plan.metric, "region": region or "all"}
+    metric_key = plan.metric
+    aggregation = METRIC_AGGREGATIONS.get(metric_key, "sum")
+    values = [r.get(metric_key, 0.0) for r in rows]
+
+    if aggregation == "average":
+        value = sum(values) / len(values)
+        value = round(value, 4)
+    else:
+        value = sum(values)
+
+    return {
+        "value": value,
+        "metric": metric_key,
+        "region": region or "全域",
+        "time_window": plan.time_window,
+    }
