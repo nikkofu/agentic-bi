@@ -120,6 +120,43 @@ def test_followup_can_change_region_and_monthly_view_together():
     ]
 
 
+def test_direct_trend_question_returns_monthly_series():
+    payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "近3个月华东区毛利率趋势",
+        "conversation_id": "c-6",
+    }
+
+    resp = client.post("/v1/chat/query", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("近3个月华东区毛利率按月趋势为")
+    assert body["chart"]["type"] == "line"
+    assert body["chart"]["data"] == [
+        {"month": "2025-12", "value": 0.301},
+        {"month": "2026-01", "value": 0.295},
+        {"month": "2026-02", "value": 0.32},
+    ]
+
+
+def test_direct_month_over_month_question_returns_compare_answer():
+    payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率环比怎么样？",
+        "conversation_id": "c-7",
+    }
+
+    resp = client.post("/v1/chat/query", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区毛利率为32.00%")
+    assert "较前月上升2.50个百分点" in body["answer"]
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",

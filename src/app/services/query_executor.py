@@ -47,6 +47,34 @@ def _build_month_series(rows: list[dict], metric_key: str, aggregation: str) -> 
     ]
 
 
+def _build_previous_month_comparison(
+    scoped_rows: list[dict],
+    metric_key: str,
+    aggregation: str,
+    compare_to: str,
+) -> dict:
+    if compare_to != "prev_month":
+        return {}
+
+    months = sorted({row["month"] for row in scoped_rows if row.get("month")})
+    if len(months) < 2:
+        return {}
+
+    previous_month = months[-2]
+    compare_rows = [row for row in scoped_rows if row.get("month") == previous_month]
+    if not compare_rows:
+        return {}
+
+    compare_value = _aggregate_values(
+        [row.get(metric_key, 0.0) for row in compare_rows],
+        aggregation,
+    )
+    return {
+        "compare_to": compare_to,
+        "compare_value": compare_value,
+    }
+
+
 def execute_query(plan, scope):
     rows = load_sales_fixture()
     region = plan.filters.get("region")
@@ -55,6 +83,7 @@ def execute_query(plan, scope):
     allowed_regions = scope.get("allowed_regions", [])
     if allowed_regions:
         rows = [r for r in rows if r.get("region") in allowed_regions]
+    scoped_rows = list(rows)
     rows = _filter_rows_by_time_window(rows, plan.time_window)
 
     if not rows:
@@ -74,6 +103,12 @@ def execute_query(plan, scope):
         series = _build_month_series(rows, metric_key, aggregation)
 
     value = _aggregate_values(values, aggregation)
+    comparison = _build_previous_month_comparison(
+        scoped_rows=scoped_rows,
+        metric_key=metric_key,
+        aggregation=aggregation,
+        compare_to=plan.compare_to,
+    )
 
     return {
         "value": value,
@@ -81,4 +116,6 @@ def execute_query(plan, scope):
         "region": region or "全域",
         "time_window": plan.time_window,
         "series": series,
+        "delta_value": value - comparison["compare_value"] if comparison else None,
+        **comparison,
     }
