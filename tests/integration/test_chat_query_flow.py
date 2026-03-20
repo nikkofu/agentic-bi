@@ -63,6 +63,63 @@ def test_query_returns_revenue_metric_with_metric_specific_answer():
     assert body["chart"]["data"][0]["value"] == 2500
 
 
+def test_followup_monthly_view_returns_time_series_chart():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-4",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "按月看",
+        "conversation_id": "c-4",
+    }
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("近3个月华东区毛利率按月趋势为")
+    assert body["chart"]["type"] == "line"
+    assert body["chart"]["data"] == [
+        {"month": "2025-12", "value": 0.301},
+        {"month": "2026-01", "value": 0.295},
+        {"month": "2026-02", "value": 0.32},
+    ]
+
+
+def test_followup_can_change_region_and_monthly_view_together():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-5",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "那华南按月看",
+        "conversation_id": "c-5",
+    }
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("近3个月华南区毛利率按月趋势为")
+    assert body["chart"]["data"] == [
+        {"month": "2025-12", "value": 0.276},
+        {"month": "2026-01", "value": 0.281},
+        {"month": "2026-02", "value": 0.287},
+    ]
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",

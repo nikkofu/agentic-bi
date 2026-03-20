@@ -29,7 +29,7 @@ def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
     if any(alias in question for alias in METRIC_ALIASES):
         return False
 
-    return any(token in question for token in ["华东", "华南", "那"])
+    return any(token in question for token in ["华东", "华南", "那", "按月"])
 
 
 @router.post("/query")
@@ -75,7 +75,7 @@ def query(req: QueryRequest):
 
     save_last_plan(req.conversation_id, plan)
     result = execute_query(plan, scope={"allowed_regions": allowed_regions})
-    result["has_time_series"] = True
+    result["has_time_series"] = bool(result.get("series"))
     result["has_rank"] = False
     payload = build_response(result)
     payload["trace_id"] = trace_id
