@@ -25,7 +25,12 @@ def parse_intent(question: str) -> ParsedIntent:
     elif "华南" in question:
         filters["region"] = "华南"
 
-    compare_to = "prev_month" if "环比" in question else ""
+    if "同比" in question:
+        compare_to = "prev_year"
+    elif "环比" in question:
+        compare_to = "prev_month"
+    else:
+        compare_to = ""
 
     if "近3个月" in question:
         time_window = "recent_3_months"

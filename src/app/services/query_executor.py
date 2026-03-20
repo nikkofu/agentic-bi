@@ -75,6 +75,37 @@ def _build_previous_month_comparison(
     }
 
 
+def _build_previous_year_comparison(
+    scoped_rows: list[dict],
+    current_rows: list[dict],
+    metric_key: str,
+    aggregation: str,
+    compare_to: str,
+) -> dict:
+    if compare_to != "prev_year" or not current_rows:
+        return {}
+
+    current_months = sorted({row["month"] for row in current_rows if row.get("month")})
+    if not current_months:
+        return {}
+
+    anchor_month = current_months[-1]
+    year, month = anchor_month.split("-")
+    previous_year_month = f"{int(year) - 1:04d}-{month}"
+    compare_rows = [row for row in scoped_rows if row.get("month") == previous_year_month]
+    if not compare_rows:
+        return {}
+
+    compare_value = _aggregate_values(
+        [row.get(metric_key, 0.0) for row in compare_rows],
+        aggregation,
+    )
+    return {
+        "compare_to": compare_to,
+        "compare_value": compare_value,
+    }
+
+
 def execute_query(plan, scope):
     rows = load_sales_fixture()
     region = plan.filters.get("region")
@@ -109,6 +140,14 @@ def execute_query(plan, scope):
         aggregation=aggregation,
         compare_to=plan.compare_to,
     )
+    if not comparison:
+        comparison = _build_previous_year_comparison(
+            scoped_rows=scoped_rows,
+            current_rows=rows,
+            metric_key=metric_key,
+            aggregation=aggregation,
+            compare_to=plan.compare_to,
+        )
 
     return {
         "value": value,

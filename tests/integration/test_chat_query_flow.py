@@ -157,6 +157,22 @@ def test_direct_month_over_month_question_returns_compare_answer():
     assert "较前月上升2.50个百分点" in body["answer"]
 
 
+def test_direct_year_over_year_question_returns_compare_answer():
+    payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率同比怎么样？",
+        "conversation_id": "c-8",
+    }
+
+    resp = client.post("/v1/chat/query", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区毛利率为32.00%")
+    assert "较去年同期上升4.00个百分点" in body["answer"]
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",

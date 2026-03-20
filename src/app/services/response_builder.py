@@ -17,7 +17,7 @@ def _format_value(metric: str, value: float) -> str:
 
 
 def _format_compare_fragment(metric: str, compare_to: str, delta_value: float | None) -> str:
-    if compare_to != "prev_month" or delta_value is None:
+    if compare_to not in {"prev_month", "prev_year"} or delta_value is None:
         return ""
 
     direction = "持平"
@@ -26,13 +26,15 @@ def _format_compare_fragment(metric: str, compare_to: str, delta_value: float | 
     elif delta_value < 0:
         direction = "下降"
 
+    compare_label = "前月" if compare_to == "prev_month" else "去年同期"
+
     if direction == "持平":
-        return "，较前月持平"
+        return f"，较{compare_label}持平"
 
     if metric == "gross_margin_rate":
-        return f"，较前月{direction}{abs(delta_value) * 100:.2f}个百分点"
+        return f"，较{compare_label}{direction}{abs(delta_value) * 100:.2f}个百分点"
 
-    return f"，较前月{direction}{_format_value(metric, abs(delta_value))}"
+    return f"，较{compare_label}{direction}{_format_value(metric, abs(delta_value))}"
 
 
 def build_response(result: dict) -> dict:

@@ -1,5 +1,17 @@
 [
   {
+    "month": "2025-02",
+    "region": "华东",
+    "gross_margin_rate": 0.28,
+    "revenue": 950
+  },
+  {
+    "month": "2025-02",
+    "region": "华南",
+    "gross_margin_rate": 0.261,
+    "revenue": 780
+  },
+  {
     "month": "2025-12",
     "region": "华东",
     "gross_margin_rate": 0.301,

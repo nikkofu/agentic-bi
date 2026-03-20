@@ -28,3 +28,11 @@ def test_parse_last_month_margin_rate_month_over_month_question():
     assert intent.filters["region"] == "华东"
     assert intent.time_window == "last_month"
     assert intent.compare_to == "prev_month"
+
+
+def test_parse_last_month_margin_rate_year_over_year_question():
+    intent = parse_intent("上个月华东区毛利率同比怎么样？")
+    assert intent.metric == "gross_margin_rate"
+    assert intent.filters["region"] == "华东"
+    assert intent.time_window == "last_month"
+    assert intent.compare_to == "prev_year"
