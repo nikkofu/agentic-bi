@@ -223,6 +223,30 @@ def test_followup_year_over_year_question_reuses_previous_metric_and_scope():
     assert "较去年同期上升4.00个百分点" in body["answer"]
 
 
+def test_followup_metric_switch_reuses_previous_scope():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-11",
+    }
+    initial = client.post("/v1/chat/query", json=initial_payload)
+    assert initial.status_code == 200
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "销售额呢",
+        "conversation_id": "c-11",
+    }
+
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区销售额为2500")
+
+
 def test_unknown_metric_returns_structured_error_code():
     payload = {
         "user_id": "u-1",

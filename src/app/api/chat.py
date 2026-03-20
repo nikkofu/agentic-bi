@@ -27,7 +27,13 @@ def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
     if not has_previous_plan:
         return False
 
-    if any(alias in question for alias in METRIC_ALIASES):
+    has_metric_alias = any(alias in question for alias in METRIC_ALIASES)
+    has_explicit_scope_or_time = any(
+        token in question for token in ["华东", "华南", "上个月", "近3个月"]
+    )
+    if has_metric_alias and not has_explicit_scope_or_time:
+        return True
+    if has_metric_alias:
         return False
 
     return any(token in question for token in ["华东", "华南", "那", "按月", "环比", "同比"])

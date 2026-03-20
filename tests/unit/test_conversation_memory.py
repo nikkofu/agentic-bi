@@ -65,3 +65,17 @@ def test_followup_can_switch_to_year_over_year_compare():
     nxt = apply_followup("同比呢", prev)
     assert nxt.compare_to == "prev_year"
     assert nxt.time_window == "last_month"
+
+
+def test_followup_can_switch_metric_and_keep_scope():
+    prev = QueryPlan(
+        metric="gross_margin_rate",
+        filters={"region": "华东"},
+        time_window="last_month",
+        group_by=["category"],
+        compare_to="",
+    )
+    nxt = apply_followup("销售额呢", prev)
+    assert nxt.metric == "revenue"
+    assert nxt.filters["region"] == "华东"
+    assert nxt.time_window == "last_month"

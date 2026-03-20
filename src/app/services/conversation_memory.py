@@ -1,10 +1,16 @@
 from copy import deepcopy
 
+from app.domain.metrics_catalog import METRIC_ALIASES
+
 _conversation_store: dict[str, object] = {}
 
 
 def apply_followup(question: str, previous_plan):
     plan = deepcopy(previous_plan)
+    for alias, metric in METRIC_ALIASES.items():
+        if alias in question:
+            plan.metric = metric
+            break
     if "按月" in question:
         plan.time_window = "recent_3_months"
         plan.group_by = ["month"]
