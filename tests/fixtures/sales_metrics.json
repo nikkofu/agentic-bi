@@ -1,0 +1,13 @@
+{
+  "metrics": [
+    {
+      "name": "gross_margin_rate",
+      "aliases": ["毛利率"]
+    },
+    {
+      "name": "revenue",
+      "aliases": ["销售额"]
+    }
+  ],
+  "dimensions": ["region", "category", "channel", "date"]
+}
