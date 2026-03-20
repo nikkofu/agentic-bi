@@ -55,6 +55,7 @@ def query(req: QueryRequest):
         plan = build_query_plan(intent)
 
     if not plan.metric and "指标" not in req.question:
+        save_last_plan(req.conversation_id, plan)
         append_audit_event(
             {
                 "trace_id": trace_id,

@@ -329,3 +329,30 @@ def test_incomplete_question_returns_metric_clarification():
     assert body["error_code"] == "MISSING_METRIC"
     assert body["message"] == "请补充要查询的指标"
     assert body["suggestions"] == ["毛利率", "销售额"]
+
+
+def test_metric_clarification_followup_reuses_previous_scope_and_time():
+    initial_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "上个月华东区怎么样？",
+        "conversation_id": "c-clarify-followup",
+    }
+
+    initial = client.post("/v1/chat/query", json=initial_payload)
+
+    assert initial.status_code == 422
+    assert initial.json()["error_code"] == "MISSING_METRIC"
+
+    followup_payload = {
+        "user_id": "u-1",
+        "tenant_id": "t-1",
+        "question": "毛利率呢",
+        "conversation_id": "c-clarify-followup",
+    }
+
+    resp = client.post("/v1/chat/query", json=followup_payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"].startswith("上个月华东区毛利率为32.00%")
