@@ -22,6 +22,20 @@ def _extract_region(plan: Any, result: Mapping[str, Any]) -> str:
     return str(result.get("region", "全域"))
 
 
+def _derive_dimensions(plan: Any) -> list[str]:
+    group_by = _lookup(plan, "group_by", []) or []
+    if not isinstance(group_by, list):
+        return []
+
+    if group_by == ["month"]:
+        return [dimension for dimension in group_by]
+
+    if bool(_lookup(plan, "group_requested", False)):
+        return [dimension for dimension in group_by]
+
+    return []
+
+
 def build_report_intent(
     *,
     question: str,
@@ -33,7 +47,6 @@ def build_report_intent(
     result: Mapping[str, Any],
 ) -> ReportIntent:
     metric = _lookup(plan, "metric") or result.get("metric")
-    group_by = _lookup(plan, "group_by", []) or []
     compare_to = _lookup(plan, "compare_to")
     region = _extract_region(plan=plan, result=result)
     time_window = _lookup(plan, "time_window") or result.get("time_window") or "current"
@@ -42,7 +55,7 @@ def build_report_intent(
         id=f"sq-{trace_id}",
         kind="metric_query",
         measures=[metric] if metric else [],
-        dimensions=[dimension for dimension in group_by],
+        dimensions=_derive_dimensions(plan),
         filters=[{"field": "region", "op": "=", "value": region}],
         time={"window": time_window},
         comparison={"mode": compare_to} if compare_to else None,
