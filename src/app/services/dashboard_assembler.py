@@ -26,11 +26,19 @@ def _chart_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def build_materialized_binding(*, intent: ReportIntent, result: Mapping[str, Any]) -> dict:
     source_ref = intent.semantic_queries[0].id
+    insight_value = "auto"
+    if intent.explanations and isinstance(intent.explanations[0], Mapping):
+        content = intent.explanations[0].get("content")
+        if content is not None:
+            insight_value = str(content)
+
     return {
         "id": f"binding-{intent.trace['trace_id']}",
         "source_ref": source_ref,
         "kind": "materialized",
+        "value": result.get("value"),
         "rows": _chart_rows(result),
+        "insight": insight_value,
     }
 
 

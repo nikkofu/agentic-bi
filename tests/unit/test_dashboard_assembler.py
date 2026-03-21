@@ -43,3 +43,18 @@ def test_assemble_dashboard_creates_metric_card_chart_and_insight_widgets():
         dashboard.data_bindings[0]["source_ref"]
         == dashboard.pages[0].sections[0].widgets[1].binding.source_ref
     )
+
+
+def test_assemble_dashboard_emits_binding_payload_for_all_widget_value_paths():
+    dashboard = assemble_dashboard(
+        intent=intent_fixture(),
+        result={"metric": "gross_margin_rate", "value": 0.32, "region": "华东", "series": []},
+    )
+
+    section = dashboard.pages[0].sections[0]
+    binding_payload = dashboard.data_bindings[0]
+    assert binding_payload["source_ref"] == section.widgets[0].binding.source_ref
+
+    for widget in section.widgets:
+        assert widget.binding.source_ref == binding_payload["source_ref"]
+        assert widget.binding.value_path in binding_payload

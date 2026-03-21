@@ -74,3 +74,24 @@ def test_build_report_intent_preserves_requested_grouping_dimension_for_breakdow
     assert plan.group_by == ["channel"]
     assert plan.group_requested is True
     assert intent.semantic_queries[0].dimensions == ["channel"]
+
+
+def test_build_report_intent_does_not_synthesize_global_region_filter_for_unscoped_query():
+    question = "上个月毛利率是多少？"
+    plan = build_query_plan(parse_intent(question))
+    intent = build_report_intent(
+        question=question,
+        tenant_id="t-1",
+        dataset_id="sales-fixture",
+        trace_id="trace-4",
+        permission_context=_permission_context(),
+        plan=plan,
+        result={
+            "metric": "gross_margin_rate",
+            "value": 0.30,
+            "region": "全域",
+        },
+    )
+
+    assert plan.filters == {}
+    assert intent.semantic_queries[0].filters == []

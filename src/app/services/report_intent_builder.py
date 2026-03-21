@@ -10,16 +10,18 @@ def _lookup(container: Any, key: str, default: Any = None) -> Any:
     return getattr(container, key, default)
 
 
-def _extract_region(plan: Any, result: Mapping[str, Any]) -> str:
-    explicit_region = _lookup(plan, "region")
-    if explicit_region:
-        return explicit_region
-
+def _extract_region_filter_value(plan: Any) -> str | None:
     filters = _lookup(plan, "filters", {})
-    if isinstance(filters, Mapping) and filters.get("region"):
-        return str(filters["region"])
+    if isinstance(filters, Mapping):
+        region = filters.get("region")
+        if region and str(region) != "全域":
+            return str(region)
 
-    return str(result.get("region", "全域"))
+    explicit_region = _lookup(plan, "region")
+    if explicit_region and str(explicit_region) != "全域":
+        return str(explicit_region)
+
+    return None
 
 
 def _derive_dimensions(plan: Any) -> list[str]:
@@ -48,15 +50,18 @@ def build_report_intent(
 ) -> ReportIntent:
     metric = _lookup(plan, "metric") or result.get("metric")
     compare_to = _lookup(plan, "compare_to")
-    region = _extract_region(plan=plan, result=result)
+    region_filter_value = _extract_region_filter_value(plan=plan)
     time_window = _lookup(plan, "time_window") or result.get("time_window") or "current"
+    query_filters = []
+    if region_filter_value is not None:
+        query_filters = [{"field": "region", "op": "=", "value": region_filter_value}]
 
     semantic_query = SemanticQuery(
         id=f"sq-{trace_id}",
         kind="metric_query",
         measures=[metric] if metric else [],
         dimensions=_derive_dimensions(plan),
-        filters=[{"field": "region", "op": "=", "value": region}],
+        filters=query_filters,
         time={"window": time_window},
         comparison={"mode": compare_to} if compare_to else None,
     )

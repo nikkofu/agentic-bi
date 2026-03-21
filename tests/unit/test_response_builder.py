@@ -111,3 +111,43 @@ def test_builder_returns_bar_chart_for_region_breakdown():
 
     assert payload["chart"]["type"] == "bar"
     assert payload["answer"].startswith("上个月全域区销售额按区域分布为")
+
+
+def test_build_response_with_reporting_keeps_legacy_answer_and_chart_and_adds_reporting_fields():
+    from app.domain.models import QueryPlan
+    from app.services.response_builder import build_response, build_response_with_reporting
+
+    result = {
+        "metric": "gross_margin_rate",
+        "region": "华东",
+        "time_window": "last_month",
+        "value": 0.32,
+    }
+    plan = QueryPlan(
+        metric="gross_margin_rate",
+        filters={"region": "华东"},
+        time_window="last_month",
+        group_by=["category"],
+        compare_to="",
+        group_requested=False,
+    )
+
+    legacy_payload = build_response(result)
+    reporting_payload = build_response_with_reporting(
+        question="上个月华东区毛利率是多少？",
+        tenant_id="t-1",
+        dataset_id="sales-fixture",
+        trace_id="trace-1",
+        permission_context={
+            "principal_id": "u-1",
+            "role_scope": ["region:华东"],
+            "row_level_policy_ref": "sales-region:u-1",
+        },
+        plan=plan,
+        result=result,
+    )
+
+    assert reporting_payload["answer"] == legacy_payload["answer"]
+    assert reporting_payload["chart"] == legacy_payload["chart"]
+    assert "report_intent" in reporting_payload
+    assert "dashboard_spec" in reporting_payload
