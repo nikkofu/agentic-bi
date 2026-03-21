@@ -15,6 +15,7 @@ class QueryPlan(BaseModel):
     time_window: str
     group_by: list[str]
     compare_to: str
+    group_requested: bool = False
 
 
 class ValidationErrorCode(str, Enum):

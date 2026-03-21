@@ -33,3 +33,17 @@ def test_chat_query_returns_403_for_out_of_scope_region():
 
     assert resp.status_code == 403
     assert resp.json()["error_code"] == "PERMISSION_DENIED"
+
+
+def test_chat_query_returns_403_for_unknown_user_scope():
+    payload = {
+        "user_id": "u-unknown",
+        "tenant_id": "t-1",
+        "question": "上个月华东区毛利率是多少？",
+        "conversation_id": "c-rbac-unknown",
+    }
+
+    resp = client.post("/v1/chat/query", json=payload)
+
+    assert resp.status_code == 403
+    assert resp.json()["error_code"] == "PERMISSION_DENIED"

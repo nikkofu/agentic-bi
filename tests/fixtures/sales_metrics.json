@@ -2,54 +2,72 @@
   {
     "month": "2025-02",
     "region": "华东",
+    "channel": "线上",
+    "category": "家电",
     "gross_margin_rate": 0.28,
     "revenue": 950
   },
   {
     "month": "2025-02",
     "region": "华南",
+    "channel": "线上",
+    "category": "家电",
     "gross_margin_rate": 0.261,
     "revenue": 780
   },
   {
     "month": "2025-12",
     "region": "华东",
+    "channel": "线上",
+    "category": "家电",
     "gross_margin_rate": 0.301,
     "revenue": 1100
   },
   {
     "month": "2026-01",
     "region": "华东",
+    "channel": "线上",
+    "category": "家电",
     "gross_margin_rate": 0.295,
     "revenue": 1000
   },
   {
     "month": "2026-02",
     "region": "华东",
+    "channel": "线上",
+    "category": "家电",
     "gross_margin_rate": 0.312,
     "revenue": 1200
   },
   {
     "month": "2025-12",
     "region": "华南",
+    "channel": "线下",
+    "category": "配件",
     "gross_margin_rate": 0.276,
     "revenue": 800
   },
   {
     "month": "2026-01",
     "region": "华南",
+    "channel": "线下",
+    "category": "配件",
     "gross_margin_rate": 0.281,
     "revenue": 850
   },
   {
     "month": "2026-02",
     "region": "华南",
+    "channel": "线下",
+    "category": "配件",
     "gross_margin_rate": 0.287,
     "revenue": 900
   },
   {
     "month": "2026-02",
     "region": "华东",
+    "channel": "线下",
+    "category": "配件",
     "gross_margin_rate": 0.328,
     "revenue": 1300
   }

@@ -71,3 +71,43 @@ def test_builder_includes_compare_summary_for_time_series_result():
 
     assert payload["answer"].startswith("近3个月华南区销售额按月趋势为")
     assert "最新月份较去年同期上升120" in payload["answer"]
+
+
+def test_builder_returns_bar_chart_for_grouped_breakdown():
+    from app.services.response_builder import build_response
+
+    result = {
+        "metric": "revenue",
+        "region": "华东",
+        "time_window": "last_month",
+        "group_by": ["channel"],
+        "breakdown": [
+            {"channel": "线上", "value": 1200},
+            {"channel": "线下", "value": 1300},
+        ],
+    }
+
+    payload = build_response(result)
+
+    assert payload["chart"]["type"] == "bar"
+    assert payload["answer"].startswith("上个月华东区销售额按渠道分布为")
+
+
+def test_builder_returns_bar_chart_for_region_breakdown():
+    from app.services.response_builder import build_response
+
+    result = {
+        "metric": "revenue",
+        "region": "全域",
+        "time_window": "last_month",
+        "group_by": ["region"],
+        "breakdown": [
+            {"region": "华东", "value": 2500},
+            {"region": "华南", "value": 900},
+        ],
+    }
+
+    payload = build_response(result)
+
+    assert payload["chart"]["type"] == "bar"
+    assert payload["answer"].startswith("上个月全域区销售额按区域分布为")

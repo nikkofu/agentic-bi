@@ -18,7 +18,13 @@ def load_sales_fixture() -> list[dict]:
 def _aggregate_values(values: list[float], aggregation: str) -> float:
     if aggregation == "average":
         return round(sum(values) / len(values), 4)
-    return sum(values)
+    return round(sum(values), 4)
+
+
+def _get_metric_value(row: dict, metric_key: str) -> float:
+    if metric_key == "gross_profit":
+        return round(row.get("revenue", 0.0) * row.get("gross_margin_rate", 0.0), 4)
+    return row.get(metric_key, 0.0)
 
 
 def _filter_rows_by_time_window(rows: list[dict], time_window: str) -> list[dict]:
@@ -39,11 +45,30 @@ def _filter_rows_by_time_window(rows: list[dict], time_window: str) -> list[dict
 def _build_month_series(rows: list[dict], metric_key: str, aggregation: str) -> list[dict]:
     grouped_values: dict[str, list[float]] = {}
     for row in rows:
-        grouped_values.setdefault(row["month"], []).append(row.get(metric_key, 0.0))
+        grouped_values.setdefault(row["month"], []).append(_get_metric_value(row, metric_key))
 
     return [
         {"month": month, "value": _aggregate_values(grouped_values[month], aggregation)}
         for month in sorted(grouped_values)
+    ]
+
+
+def _build_dimension_breakdown(
+    rows: list[dict],
+    metric_key: str,
+    aggregation: str,
+    dimension: str,
+) -> list[dict]:
+    grouped_values: dict[str, list[float]] = {}
+    for row in rows:
+        dimension_value = row.get(dimension)
+        if dimension_value is None:
+            continue
+        grouped_values.setdefault(dimension_value, []).append(_get_metric_value(row, metric_key))
+
+    return [
+        {dimension: dimension_value, "value": _aggregate_values(values, aggregation)}
+        for dimension_value, values in grouped_values.items()
     ]
 
 
@@ -66,7 +91,7 @@ def _build_previous_month_comparison(
         return {}
 
     compare_value = _aggregate_values(
-        [row.get(metric_key, 0.0) for row in compare_rows],
+        [_get_metric_value(row, metric_key) for row in compare_rows],
         aggregation,
     )
     return {
@@ -97,7 +122,7 @@ def _build_previous_year_comparison(
         return {}
 
     compare_value = _aggregate_values(
-        [row.get(metric_key, 0.0) for row in compare_rows],
+        [_get_metric_value(row, metric_key) for row in compare_rows],
         aggregation,
     )
     return {
@@ -127,11 +152,14 @@ def execute_query(plan, scope):
 
     metric_key = plan.metric
     aggregation = METRIC_AGGREGATIONS.get(metric_key, "sum")
-    values = [r.get(metric_key, 0.0) for r in rows]
+    values = [_get_metric_value(row, metric_key) for row in rows]
 
     series = []
+    breakdown = []
     if plan.group_by == ["month"]:
         series = _build_month_series(rows, metric_key, aggregation)
+    elif getattr(plan, "group_requested", False) and len(plan.group_by) == 1:
+        breakdown = _build_dimension_breakdown(rows, metric_key, aggregation, plan.group_by[0])
 
     value = _aggregate_values(values, aggregation)
     comparison = _build_previous_month_comparison(
@@ -158,7 +186,9 @@ def execute_query(plan, scope):
         "metric": metric_key,
         "region": region or "全域",
         "time_window": plan.time_window,
+        "group_by": plan.group_by,
         "series": series,
+        "breakdown": breakdown,
         "delta_value": comparison_base_value - comparison["compare_value"] if comparison else None,
         **comparison,
     }

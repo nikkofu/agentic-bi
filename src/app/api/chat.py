@@ -2,12 +2,12 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.domain.metrics_catalog import METRIC_ALIASES
+from app.domain.metrics_catalog import GROUP_DIMENSION_SUGGESTION_MAP, GROUP_DIMENSION_SUGGESTIONS, METRIC_ALIASES, PRIMARY_METRIC_SUGGESTIONS
 from app.domain.models import ValidationErrorCode
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event, new_trace_id
 from app.services.conversation_memory import apply_followup, get_last_plan, save_last_plan
-from app.services.intent_parser import parse_intent
+from app.services.intent_parser import parse_compare_to, parse_group_by, parse_intent, parse_time_window
 from app.services.query_executor import execute_query
 from app.services.query_planner import build_query_plan
 from app.services.query_validator import validate_plan
@@ -29,23 +29,94 @@ def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
 
     has_metric_alias = any(alias in question for alias in METRIC_ALIASES)
     has_explicit_scope = any(token in question for token in ["华东", "华南"])
-    has_explicit_time = any(token in question for token in ["上个月", "近3个月"])
-    has_followup_cue = any(token in question for token in ["那", "呢", "按月", "环比", "同比"])
+    has_explicit_time = parse_time_window(question) != "current"
+    has_followup_cue = any(token in question for token in ["那", "呢", "按月"])
+    has_compare_phrase = bool(parse_compare_to(question))
+    has_grouping_request = bool(parse_group_by(question))
 
     if has_metric_alias and not has_explicit_scope and not has_explicit_time:
         return True
-    if has_metric_alias and has_followup_cue and not has_explicit_time:
+    if has_metric_alias and (has_followup_cue or has_compare_phrase or has_grouping_request) and not has_explicit_time:
         return True
     if has_metric_alias:
         return False
 
-    return has_explicit_scope or has_followup_cue
+    return has_explicit_scope or has_followup_cue or has_compare_phrase or has_grouping_request
+
+
+def _build_result_summary(result: dict) -> dict:
+    return {
+        "metric": result.get("metric"),
+        "region": result.get("region"),
+        "time_window": result.get("time_window"),
+        "value": result.get("value"),
+        "compare_to": result.get("compare_to"),
+        "series_points": len(result.get("series", [])),
+    }
+
+
+def _looks_like_metric_request(question: str) -> bool:
+    return any(
+        token in question
+        for token in ["指标", "率", "额", "利润", "营收", "收入", "销售额", "毛利"]
+    )
+
+
+def _build_unknown_metric_suggestions(question: str) -> list[str]:
+    if any(token in question for token in ["利润率", "盈利率"]):
+        return ["毛利率", "毛利额"]
+    if any(token in question for token in ["利润", "盈利", "毛利"]):
+        return ["毛利额", "毛利率"]
+    if any(token in question for token in ["营收", "收入", "销售"]):
+        return ["销售额"]
+    return PRIMARY_METRIC_SUGGESTIONS
+
+
+def _build_unknown_metric_message(suggestions: list[str]) -> str:
+    if suggestions == PRIMARY_METRIC_SUGGESTIONS:
+        return "未识别指标，请改问毛利率、销售额或毛利额"
+    if len(suggestions) == 1:
+        return f"未识别指标，可能想问{suggestions[0]}"
+    if len(suggestions) == 2:
+        return f"未识别指标，可能想问{suggestions[0]}或{suggestions[1]}"
+    return "未识别指标，请改问毛利率、销售额或毛利额"
+
+
+def _build_invalid_dimension_suggestions(plan) -> list[str]:
+    group_by = getattr(plan, "group_by", [])
+    suggestions = [
+        GROUP_DIMENSION_SUGGESTION_MAP[dimension]
+        for dimension in group_by
+        if dimension in GROUP_DIMENSION_SUGGESTION_MAP
+    ]
+    return suggestions or GROUP_DIMENSION_SUGGESTIONS
+
+
+def _build_validation_error_content(error_code: str, trace_id: str, plan=None, question: str = "") -> dict:
+    if error_code == ValidationErrorCode.UNKNOWN_METRIC.value:
+        suggestions = _build_unknown_metric_suggestions(question)
+        return {
+            "error_code": error_code,
+            "message": _build_unknown_metric_message(suggestions),
+            "suggestions": suggestions,
+            "trace_id": trace_id,
+        }
+
+    if error_code == ValidationErrorCode.INVALID_DIMENSION_COMBO.value:
+        return {
+            "error_code": error_code,
+            "message": "暂不支持同时按多个维度查看，请只保留一个分组维度",
+            "suggestions": _build_invalid_dimension_suggestions(plan),
+            "trace_id": trace_id,
+        }
+
+    return {"error_code": error_code, "message": "invalid metric", "trace_id": trace_id}
 
 
 @router.post("/query")
 def query(req: QueryRequest):
     trace_id = new_trace_id()
-    previous_plan = get_last_plan(req.conversation_id)
+    previous_plan = get_last_plan(req.tenant_id, req.user_id, req.conversation_id)
     allowed_regions = resolve_allowed_regions(req.user_id, req.tenant_id)
 
     if _is_followup_question(req.question, previous_plan is not None):
@@ -54,14 +125,16 @@ def query(req: QueryRequest):
         intent = parse_intent(req.question)
         plan = build_query_plan(intent)
 
-    if not plan.metric and "指标" not in req.question:
-        save_last_plan(req.conversation_id, plan)
+    if not plan.metric and not _looks_like_metric_request(req.question):
+        save_last_plan(req.tenant_id, req.user_id, req.conversation_id, plan)
         append_audit_event(
             {
                 "trace_id": trace_id,
                 "status": ValidationErrorCode.MISSING_METRIC.value,
+                "error_code": ValidationErrorCode.MISSING_METRIC.value,
                 "question": req.question,
                 "conversation_id": req.conversation_id,
+                "query_plan": plan.model_dump(),
             }
         )
         return JSONResponse(
@@ -69,7 +142,7 @@ def query(req: QueryRequest):
             content={
                 "error_code": ValidationErrorCode.MISSING_METRIC.value,
                 "message": "请补充要查询的指标",
-                "suggestions": list(METRIC_ALIASES.keys()),
+                "suggestions": PRIMARY_METRIC_SUGGESTIONS,
                 "trace_id": trace_id,
             },
         )
@@ -81,21 +154,25 @@ def query(req: QueryRequest):
             {
                 "trace_id": trace_id,
                 "status": str(exc),
+                "error_code": str(exc),
                 "question": req.question,
                 "conversation_id": req.conversation_id,
+                "query_plan": plan.model_dump(),
             }
         )
         return JSONResponse(
             status_code=400,
-            content={"error_code": str(exc), "message": "invalid metric", "trace_id": trace_id},
+            content=_build_validation_error_content(str(exc), trace_id, plan=plan, question=req.question),
         )
     except PermissionError as exc:
         append_audit_event(
             {
                 "trace_id": trace_id,
                 "status": str(exc),
+                "error_code": str(exc),
                 "question": req.question,
                 "conversation_id": req.conversation_id,
+                "query_plan": plan.model_dump(),
             }
         )
         return JSONResponse(
@@ -103,7 +180,7 @@ def query(req: QueryRequest):
             content={"error_code": str(exc), "message": "permission denied", "trace_id": trace_id},
         )
 
-    save_last_plan(req.conversation_id, plan)
+    save_last_plan(req.tenant_id, req.user_id, req.conversation_id, plan)
     result = execute_query(plan, scope={"allowed_regions": allowed_regions})
     result["has_time_series"] = bool(result.get("series"))
     result["has_rank"] = False
@@ -116,6 +193,9 @@ def query(req: QueryRequest):
             "status": "SUCCESS",
             "question": req.question,
             "conversation_id": req.conversation_id,
+            "query_plan": plan.model_dump(),
+            "response_type": payload["chart"]["type"],
+            "result_summary": _build_result_summary(result),
         }
     )
     return payload

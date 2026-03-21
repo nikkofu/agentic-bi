@@ -1,4 +1,4 @@
-from app.domain.metrics_catalog import METRIC_LABELS
+from app.domain.metrics_catalog import DIMENSION_LABELS, METRIC_LABELS
 
 
 TIME_WINDOW_LABELS = {
@@ -39,8 +39,11 @@ def _format_compare_fragment(metric: str, compare_to: str, delta_value: float | 
 
 def build_response(result: dict) -> dict:
     series = result.get("series", [])
+    breakdown = result.get("breakdown", [])
     if series:
         chart_type = "line"
+    elif breakdown:
+        chart_type = "bar"
     elif result.get("has_time_series"):
         chart_type = "line"
     elif result.get("has_rank"):
@@ -66,6 +69,14 @@ def build_response(result: dict) -> dict:
             compare_summary = f"，最新月份{compare_fragment.lstrip('，')}"
         answer = f"{time_window_label}{region}区{metric_label}按月趋势为：{series_summary}{compare_summary}"
         chart_data = series
+    elif breakdown:
+        dimension = result.get("group_by", [""])[0]
+        dimension_label = DIMENSION_LABELS.get(dimension, dimension)
+        breakdown_summary = "，".join(
+            f"{point.get(dimension, '')} {_format_value(metric, point['value'])}" for point in breakdown
+        )
+        answer = f"{time_window_label}{region}区{metric_label}按{dimension_label}分布为：{breakdown_summary}"
+        chart_data = breakdown
     else:
         value = _format_value(metric, result.get("value", 0))
         compare_fragment = _format_compare_fragment(

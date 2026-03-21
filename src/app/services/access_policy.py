@@ -5,4 +5,4 @@ USER_REGION_SCOPES = {
 
 
 def resolve_allowed_regions(user_id: str, tenant_id: str) -> list[str]:
-    return USER_REGION_SCOPES.get((tenant_id, user_id), ["华东", "华南"])
+    return USER_REGION_SCOPES.get((tenant_id, user_id), [])

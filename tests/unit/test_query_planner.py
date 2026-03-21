@@ -50,6 +50,7 @@ class YearOverYearIntent:
     filters = {"region": "华东"}
     time_window = "last_month"
     compare_to = "prev_year"
+    group_by = []
 
 
 def test_planner_preserves_year_over_year_compare_request():
@@ -57,3 +58,17 @@ def test_planner_preserves_year_over_year_compare_request():
     assert plan.metric == "gross_margin_rate"
     assert plan.group_by == ["category"]
     assert plan.compare_to == "prev_year"
+
+
+class ChannelGroupIntent:
+    metric = "revenue"
+    filters = {"region": "华东"}
+    time_window = "last_month"
+    compare_to = ""
+    group_by = ["channel"]
+
+
+def test_planner_preserves_channel_grouping_request():
+    plan = build_query_plan(ChannelGroupIntent())
+    assert plan.metric == "revenue"
+    assert plan.group_by == ["channel"]
