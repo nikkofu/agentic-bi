@@ -25,11 +25,15 @@ Phase 2/3 (from RFP) extend toward proactive diagnosis and execution workflows.
 - Natural-language sales intent parsing
 - Query-plan construction and validation
 - Deterministic fixture-backed execution
-- Narrative/chart response building for scalar answers and monthly trends
-- Direct questions for last-month values, recent-three-month trends, month-over-month comparisons, and year-over-year comparisons
-- Conversation follow-up memory for region switch, monthly trend view, and `环比/同比` follow-up questions
+- Narrative/chart response building for scalar answers, grouped breakdowns, and monthly trends
+- Direct questions for last-month values, grouped region/channel/category breakdowns, recent-three-month trends, month-over-month comparisons, and year-over-year comparisons
+- Core metric coverage for `毛利率`, `销售额`, and `毛利额`
+- Revenue alias coverage for `销售额` / `营收` / `收入`, plus broader grouping phrasing such as `按销售渠道看`
+- Broader time and comparison phrasing such as `最近三个月...走势`, `和上月比`, and `和去年同期比`
+- Conversation follow-up memory for region switch, grouped breakdown view, monthly trend view, and `环比/同比` follow-up questions across the supported metrics
 - Audit event logging with trace IDs and SQLite persistence
-- Minimal clarification responses when the user omits the metric
+- Recovery guidance for missing metrics, unknown metrics, and invalid multi-dimension grouping requests, including targeted repair suggestions for near-miss metric terms and invalid dimension combinations
+- Proactive insight pipeline primitives: rule-based anomaly detection, single-layer attribution, insight card generation, monitor orchestration, and RBAC-scoped insight listing API
 
 ## Run
 
