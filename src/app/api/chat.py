@@ -11,7 +11,7 @@ from app.services.intent_parser import parse_compare_to, parse_group_by, parse_i
 from app.services.query_executor import execute_query
 from app.services.query_planner import build_query_plan
 from app.services.query_validator import validate_plan
-from app.services.response_builder import build_response
+from app.services.response_builder import build_response_with_reporting
 
 router = APIRouter(prefix="/v1/chat")
 
@@ -53,6 +53,14 @@ def _build_result_summary(result: dict) -> dict:
         "compare_to": result.get("compare_to"),
         "series_points": len(result.get("series", [])),
     }
+
+
+def _normalize_dashboard_binding_kinds(dashboard_payload: dict) -> dict:
+    bindings = dashboard_payload.get("data_bindings", [])
+    for binding in bindings:
+        if binding.get("kind") == "materialized":
+            binding["kind"] = "materialized_result"
+    return dashboard_payload
 
 
 def _looks_like_metric_request(question: str) -> bool:
@@ -184,8 +192,28 @@ def query(req: QueryRequest):
     result = execute_query(plan, scope={"allowed_regions": allowed_regions})
     result["has_time_series"] = bool(result.get("series"))
     result["has_rank"] = False
-    payload = build_response(result)
-    payload["trace_id"] = trace_id
+    reporting_payload = build_response_with_reporting(
+        question=req.question,
+        tenant_id=req.tenant_id,
+        dataset_id="sales-fixture",
+        trace_id=trace_id,
+        permission_context={
+            "principal_id": req.user_id,
+            "role_scope": [f"region:{region}" for region in allowed_regions],
+            "row_level_policy_ref": f"sales-region:{req.user_id}",
+        },
+        plan=plan,
+        result=result,
+    )
+    payload = {
+        "answer": reporting_payload["answer"],
+        "chart": reporting_payload["chart"],
+        "report_preview": {
+            "intent": reporting_payload["report_intent"],
+            "dashboard": _normalize_dashboard_binding_kinds(reporting_payload["dashboard_spec"]),
+        },
+        "trace_id": trace_id,
+    }
 
     append_audit_event(
         {
