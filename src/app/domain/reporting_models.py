@@ -1,13 +1,17 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class PermissionContext(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PermissionContext(StrictModel):
     principal_id: str
     role_scope: list[str] = Field(default_factory=list)
     row_level_policy_ref: str | None = None
 
 
-class SemanticQuery(BaseModel):
+class SemanticQuery(StrictModel):
     id: str
     kind: str
     measures: list[str] = Field(default_factory=list)
@@ -20,21 +24,21 @@ class SemanticQuery(BaseModel):
     display_hint: dict = Field(default_factory=dict)
 
 
-class ChartPresentation(BaseModel):
+class ChartPresentation(StrictModel):
     id: str
     title: str | None = None
     layout: dict = Field(default_factory=dict)
     config: dict = Field(default_factory=dict)
 
 
-class DashboardPage(BaseModel):
+class DashboardPage(StrictModel):
     id: str
     title: str | None = None
     layout: dict = Field(default_factory=dict)
     sections: list[dict] = Field(default_factory=list)
 
 
-class DashboardSpec(BaseModel):
+class DashboardSpec(StrictModel):
     id: str
     version: str
     title: str
@@ -44,10 +48,10 @@ class DashboardSpec(BaseModel):
     variables: list[dict] = Field(default_factory=list)
     data_bindings: list[dict] = Field(default_factory=list)
     interactions: list[dict] = Field(default_factory=list)
-    pages: list[DashboardPage] = Field(default_factory=list)
+    pages: list[DashboardPage] = Field(..., min_length=1)
 
 
-class EditorState(BaseModel):
+class EditorState(StrictModel):
     version: str
     document_id: str
     selection: dict = Field(default_factory=dict)
@@ -58,7 +62,7 @@ class EditorState(BaseModel):
     viewport: dict = Field(default_factory=dict)
 
 
-class ReportIntent(BaseModel):
+class ReportIntent(StrictModel):
     id: str
     version: str
     tenant_id: str
@@ -67,7 +71,7 @@ class ReportIntent(BaseModel):
     question: str
     goal: str
     permission_context: PermissionContext
-    semantic_queries: list[SemanticQuery]
+    semantic_queries: list[SemanticQuery] = Field(..., min_length=1)
     explanations: list[dict] = Field(default_factory=list)
     constraints: dict = Field(default_factory=dict)
     trace: dict = Field(default_factory=dict)
