@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import Column, Integer, MetaData, String, Table, Text, insert
+from sqlalchemy import Column, Integer, MetaData, String, Table, Text, insert, select
 
 from app.infra.db import get_engine
 
@@ -39,3 +39,25 @@ class InsightRepository:
                 )
             )
         return card
+
+    def list_by_regions(self, allowed_regions: list[str]) -> list[dict]:
+        with self.engine.begin() as connection:
+            rows = connection.execute(select(insight_cards)).mappings().all()
+
+        cards = []
+        for row in rows:
+            scope = json.loads(row["scope"])
+            if allowed_regions and scope.get("region") not in allowed_regions:
+                continue
+            cards.append(
+                {
+                    "trace_id": row["trace_id"],
+                    "metric": row["metric"],
+                    "scope": scope,
+                    "severity": row["severity"],
+                    "summary": row["summary"],
+                    "attribution": json.loads(row["attribution"]),
+                    "suggested_next_question": row["suggested_next_question"],
+                }
+            )
+        return cards
