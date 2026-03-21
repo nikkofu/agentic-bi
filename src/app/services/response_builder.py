@@ -1,4 +1,6 @@
 from app.domain.metrics_catalog import DIMENSION_LABELS, METRIC_LABELS
+from app.services.dashboard_assembler import assemble_dashboard
+from app.services.report_intent_builder import build_report_intent
 
 
 TIME_WINDOW_LABELS = {
@@ -90,3 +92,29 @@ def build_response(result: dict) -> dict:
         "answer": answer,
         "chart": {"type": chart_type, "data": chart_data},
     }
+
+
+def build_response_with_reporting(
+    *,
+    question: str,
+    tenant_id: str,
+    dataset_id: str,
+    trace_id: str,
+    permission_context: dict,
+    plan,
+    result: dict,
+) -> dict:
+    intent = build_report_intent(
+        question=question,
+        tenant_id=tenant_id,
+        dataset_id=dataset_id,
+        trace_id=trace_id,
+        permission_context=permission_context,
+        plan=plan,
+        result=result,
+    )
+    dashboard = assemble_dashboard(intent=intent, result=result)
+    payload = build_response(result)
+    payload["report_intent"] = intent.model_dump(mode="python")
+    payload["dashboard_spec"] = dashboard.model_dump(mode="python")
+    return payload

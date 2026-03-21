@@ -31,11 +31,39 @@ class ChartPresentation(StrictModel):
     config: dict = Field(default_factory=dict)
 
 
+class WidgetPresentation(StrictModel):
+    family: str
+    variant: str | None = None
+    title: str | None = None
+    config: dict = Field(default_factory=dict)
+
+
+class WidgetBinding(StrictModel):
+    source_ref: str
+    query_id: str | None = None
+    value_path: str | None = None
+
+
+class DashboardWidget(StrictModel):
+    id: str
+    kind: str
+    title: str | None = None
+    presentation: WidgetPresentation
+    binding: WidgetBinding
+
+
+class DashboardSection(StrictModel):
+    id: str
+    title: str | None = None
+    layout: dict = Field(default_factory=dict)
+    widgets: list[DashboardWidget] = Field(default_factory=list)
+
+
 class DashboardPage(StrictModel):
     id: str
     title: str | None = None
     layout: dict = Field(default_factory=dict)
-    sections: list[dict] = Field(default_factory=list)
+    sections: list[DashboardSection] = Field(default_factory=list)
 
 
 class DashboardSpec(StrictModel):
