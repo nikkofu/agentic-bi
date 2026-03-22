@@ -77,3 +77,31 @@ it("shows only the active dashboard page and switches pages from the nav", async
   expect(screen.getByText("Action Plan")).toBeInTheDocument();
   expect(screen.queryByText("Overview KPI")).not.toBeInTheDocument();
 });
+
+it("uses roving tabIndex and arrow-key navigation for dashboard tabs", () => {
+  render(<DashboardPage dashboard={diagnosticReportFixture.dashboard} />);
+
+  const overviewTab = screen.getByRole("tab", { name: "Overview" });
+  const driversTab = screen.getByRole("tab", { name: "Drivers" });
+  const actionsTab = screen.getByRole("tab", { name: "Actions" });
+
+  expect(overviewTab).toHaveAttribute("tabIndex", "0");
+  expect(driversTab).toHaveAttribute("tabIndex", "-1");
+  expect(actionsTab).toHaveAttribute("tabIndex", "-1");
+
+  overviewTab.focus();
+  fireEvent.keyDown(overviewTab, { key: "ArrowRight" });
+
+  expect(driversTab).toHaveFocus();
+  expect(driversTab).toHaveAttribute("aria-selected", "true");
+  expect(driversTab).toHaveAttribute("tabIndex", "0");
+  expect(overviewTab).toHaveAttribute("aria-selected", "false");
+  expect(overviewTab).toHaveAttribute("tabIndex", "-1");
+
+  fireEvent.keyDown(driversTab, { key: "ArrowLeft" });
+
+  expect(overviewTab).toHaveFocus();
+  expect(overviewTab).toHaveAttribute("aria-selected", "true");
+  expect(overviewTab).toHaveAttribute("tabIndex", "0");
+  expect(driversTab).toHaveAttribute("tabIndex", "-1");
+});
