@@ -2,6 +2,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.engine import Connection
 
 from app.api.reporting import PERMISSION_DENIED
 from app.api.reporting import build_permission_context
@@ -10,11 +11,14 @@ from app.domain.models import QueryPlan
 from app.infra.repositories.dashboard_repo import DashboardRepository
 from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
-from app.infra.repositories.report_intent_repo import ReportIntentRepository
+from app.infra.repositories.audit_repo import AuditRepository
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event, new_trace_id
 from app.services.diagnostic_dashboard_assembler import assemble_diagnostic_dashboard
 from app.services.diagnostic_report_builder import build_diagnostic_report
+from app.services.diagnostic_snapshot_store import DiagnosticSnapshotRepositories
+from app.services.diagnostic_snapshot_store import prepare_diagnostic_snapshot_repositories
+from app.services.diagnostic_snapshot_store import persist_diagnostic_snapshot
 from app.services.insight_attribution import compute_single_layer_attribution
 from app.services.query_executor import execute_query
 from app.services.query_validator import validate_plan
@@ -51,6 +55,8 @@ def _append_report_audit_event(
     question: str,
     error_code: str | None = None,
     result_summary: dict | None = None,
+    audit_repo: AuditRepository | None = None,
+    connection: Connection | None = None,
 ) -> None:
     summary = dict(result_summary or {})
     summary["permission_context"] = {
@@ -66,7 +72,9 @@ def _append_report_audit_event(
             "conversation_id": "",
             "error_code": error_code,
             "result_summary": summary,
-        }
+        },
+        audit_repo=audit_repo,
+        connection=connection,
     )
 
 
@@ -90,6 +98,8 @@ def _ensure_default_report_bundle_for_insight_card(
     trace_id: str | None = None,
 ) -> tuple[dict, bool]:
     report_repo = DiagnosticReportRepository()
+    snapshot_repositories = prepare_diagnostic_snapshot_repositories()
+    audit_repo = AuditRepository()
     report_id = card.get("report_id")
     if report_id:
         try:
@@ -124,7 +134,7 @@ def _ensure_default_report_bundle_for_insight_card(
         tenant_id=tenant_id,
         principal_id=principal_id,
         source_ref=card["card_id"],
-        create_fn=lambda: _persist_snapshot(
+        create_fn=lambda connection: _persist_snapshot(
             trace_id=trace_id,
             tenant_id=tenant_id,
             principal_id=principal_id,
@@ -150,6 +160,9 @@ def _ensure_default_report_bundle_for_insight_card(
                     "rationale": "从异常卡片继续下钻",
                 }
             ],
+            audit_repo=audit_repo,
+            repositories=snapshot_repositories,
+            connection=connection,
         )["report"],
     )
     return (
@@ -175,6 +188,9 @@ def _persist_snapshot(
     source_ref: str,
     findings: list[dict] | None = None,
     recommendations: list[dict] | None = None,
+    audit_repo: AuditRepository | None = None,
+    repositories: DiagnosticSnapshotRepositories | None = None,
+    connection: Connection | None = None,
 ) -> dict:
     snapshot_trace_id = trace_id or new_trace_id()
     allowed_regions = resolve_allowed_regions(user_id=principal_id, tenant_id=tenant_id)
@@ -201,7 +217,6 @@ def _persist_snapshot(
         plan=query_plan.model_dump(mode="python"),
         result={"metric": metric, "time_window": time_window},
     )
-    ReportIntentRepository().save(intent)
     dashboard_id = f"dash-{snapshot_trace_id}"
     report = build_diagnostic_report(
         tenant_id=tenant_id,
@@ -234,14 +249,15 @@ def _persist_snapshot(
             "drivers": {"rows": [driver_attribution]},
         },
     )
-    DashboardRepository().save(
+    saved_report = persist_diagnostic_snapshot(
         tenant_id=tenant_id,
         principal_id=principal_id,
-        report_intent_id=intent.id,
-        dashboard=dashboard.model_dump(mode="python"),
-        dashboard_id=dashboard.id,
+        report_intent=intent,
+        dashboard=dashboard,
+        report=report,
+        repositories=repositories,
+        connection=connection,
     )
-    saved_report = DiagnosticReportRepository().save(report=report.model_dump(mode="python"))
     _append_report_audit_event(
         trace_id=snapshot_trace_id,
         status="DIAGNOSTIC_REPORT_GENERATED",
@@ -252,12 +268,13 @@ def _persist_snapshot(
             "dashboard_id": saved_report["dashboard_id"],
             "entry_mode": source_kind,
         },
+        audit_repo=audit_repo,
+        connection=connection,
     )
-    return _load_report_bundle(
-        report_id=saved_report["id"],
-        tenant_id=tenant_id,
-        principal_id=principal_id,
-    )
+    return {
+        "report": saved_report,
+        "dashboard": dashboard.model_dump(mode="python") if hasattr(dashboard, "model_dump") else dict(dashboard),
+    }
 
 
 @router.get("/reports/{report_id}")

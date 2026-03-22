@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, HTTPException
 
 from app.api.reports import _ensure_default_report_bundle_for_insight_card
@@ -5,6 +7,17 @@ from app.infra.repositories.insight_repo import InsightRepository
 from app.services.access_policy import resolve_allowed_regions
 
 router = APIRouter(prefix="/v1/insights")
+
+
+def _build_contextual_detail_url(*, report_id: str, tenant_id: str, user_id: str) -> str:
+    params = urlencode(
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "principal_id": user_id,
+        }
+    )
+    return f"/reports/{report_id}?{params}"
 
 
 @router.get("/cards")
@@ -25,7 +38,11 @@ def list_insight_cards(user_id: str, tenant_id: str):
                 **item,
                 "report_id": report_bundle["report"]["id"],
                 "dashboard_id": report_bundle["report"]["dashboard_id"],
-                "detail_url": f"/reports/{report_bundle['report']['id']}",
+                "detail_url": _build_contextual_detail_url(
+                    report_id=report_bundle["report"]["id"],
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                ),
             }
         )
     return {"items": hydrated_items}
@@ -53,7 +70,11 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
             **card,
             "report_id": report["id"],
             "dashboard_id": report["dashboard_id"],
-            "detail_url": f"/reports/{report['id']}",
+            "detail_url": _build_contextual_detail_url(
+                report_id=report["id"],
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
         }
         report_summary = {
             "report_id": report["id"],

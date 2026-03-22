@@ -1,5 +1,6 @@
 import json
 
+from sqlalchemy.engine import Connection
 from sqlalchemy import Column
 from sqlalchemy import MetaData
 from sqlalchemy import String
@@ -28,9 +29,20 @@ class ReportIntentRepository:
         self.engine = get_engine(db_url)
         metadata.create_all(self.engine)
 
-    def save(self, intent) -> dict:
+    def save(self, intent, connection: Connection | None = None) -> dict:
         payload = intent.model_dump(mode="python") if hasattr(intent, "model_dump") else dict(intent)
-        with self.engine.begin() as connection:
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                owned_connection.execute(
+                    insert(report_intents).values(
+                        id=payload["id"],
+                        tenant_id=payload["tenant_id"],
+                        principal_id=payload["permission_context"]["principal_id"],
+                        trace_id=payload.get("trace", {}).get("trace_id", ""),
+                        payload=json.dumps(payload, ensure_ascii=False),
+                    )
+                )
+        else:
             connection.execute(
                 insert(report_intents).values(
                     id=payload["id"],

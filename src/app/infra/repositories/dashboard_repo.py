@@ -1,6 +1,7 @@
 import json
 from uuid import uuid4
 
+from sqlalchemy.engine import Connection
 from sqlalchemy import Column
 from sqlalchemy import MetaData
 from sqlalchemy import String
@@ -47,21 +48,22 @@ class DashboardRepository:
         report_intent_id: str,
         dashboard: dict,
         dashboard_id: str | None = None,
+        connection: Connection | None = None,
     ) -> dict:
         resolved_dashboard_id = dashboard_id if dashboard_id is not None else f"dash-{uuid4().hex[:12]}"
         revision_id = f"rev-{uuid4().hex[:12]}"
         persisted_dashboard = dict(dashboard)
         persisted_dashboard["id"] = resolved_dashboard_id
 
-        with self.engine.begin() as connection:
-            connection.execute(
+        def _persist(active_connection: Connection) -> None:
+            active_connection.execute(
                 insert(dashboard_revisions).values(
                     revision_id=revision_id,
                     dashboard_id=resolved_dashboard_id,
                     spec_json=json.dumps(persisted_dashboard, ensure_ascii=False),
                 )
             )
-            connection.execute(
+            active_connection.execute(
                 insert(dashboards).values(
                     dashboard_id=resolved_dashboard_id,
                     tenant_id=tenant_id,
@@ -72,6 +74,12 @@ class DashboardRepository:
                     published_revision_id=revision_id,
                 )
             )
+
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                _persist(owned_connection)
+        else:
+            _persist(connection)
 
         return {
             "dashboard_id": resolved_dashboard_id,

@@ -1,3 +1,6 @@
+import sqlite3
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.infra.repositories.dashboard_repo import DashboardRepository
@@ -8,6 +11,15 @@ from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 
 client = TestClient(app)
+
+
+def count_rows_or_zero(connection: sqlite3.Connection, table_name: str) -> int:
+    try:
+        return connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return 0
 
 
 def build_insight_card_payload() -> dict:
@@ -295,6 +307,10 @@ def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["card"]["report_id"] == report_id
+    assert (
+        resp.json()["card"]["detail_url"]
+        == f"/reports/{report_id}?tenant_id=t-1&user_id=u-1&principal_id=u-1"
+    )
     assert resp.json()["report_summary"]["report_id"] == report_id
 
 
@@ -307,7 +323,10 @@ def test_insight_reads_fall_back_to_principal_owned_report_when_linked_report_is
     assert list_resp.status_code == 200
     item = next(item for item in list_resp.json()["items"] if item["card_id"] == card_id)
     assert item["report_id"] != foreign_report_id
-    assert item["detail_url"] == f"/reports/{item['report_id']}"
+    assert (
+        item["detail_url"]
+        == f"/reports/{item['report_id']}?tenant_id=t-1&user_id=u-south&principal_id=u-south"
+    )
 
     detail_resp = client.get(f"/v1/insights/cards/{card_id}", params={"tenant_id": "t-1", "user_id": "u-south"})
     assert detail_resp.status_code == 200
@@ -378,3 +397,33 @@ def test_report_endpoints_persist_success_and_failure_audit_records(tmp_path, mo
     generated_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATED")
     assert generated_event["result_summary"]["report_id"] == report_id
     assert generated_event["result_summary"]["dashboard_id"].startswith("dash-")
+
+
+def test_post_reports_generate_direct_rolls_back_snapshot_artifacts_on_report_save_failure(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-direct-rollback.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
+    def raise_report_save_failure(self, report, connection=None):
+        raise RuntimeError("report-save-failed")
+
+    monkeypatch.setattr(DiagnosticReportRepository, "save", raise_report_save_failure)
+
+    with pytest.raises(RuntimeError, match="report-save-failed"):
+        client.post(
+            "/v1/reports:generate",
+            json={
+                "tenant_id": "t-1",
+                "user_id": "u-1",
+                "principal_id": "u-1",
+                "mode": "direct",
+                "metric": "gross_margin_rate",
+                "scope": {"region": "华东"},
+                "time_window": "last_month",
+            },
+        )
+
+    with sqlite3.connect(db_path) as connection:
+        assert count_rows_or_zero(connection, "report_intents") == 0
+        assert count_rows_or_zero(connection, "dashboards") == 0
+        assert count_rows_or_zero(connection, "dashboard_revisions") == 0
+        assert count_rows_or_zero(connection, "diagnostic_reports") == 0

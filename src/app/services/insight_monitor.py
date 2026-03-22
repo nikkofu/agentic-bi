@@ -1,13 +1,15 @@
 from app.api.reporting import build_permission_context
-from app.infra.repositories.dashboard_repo import DashboardRepository
+from app.infra.repositories.audit_repo import AuditRepository
 from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
-from app.infra.repositories.report_intent_repo import ReportIntentRepository
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event
 from app.services.audit_log import new_trace_id
 from app.services.diagnostic_dashboard_assembler import assemble_diagnostic_dashboard
 from app.services.diagnostic_report_builder import build_diagnostic_report
+from app.services.diagnostic_snapshot_store import DiagnosticSnapshotRepositories
+from app.services.diagnostic_snapshot_store import prepare_diagnostic_snapshot_repositories
+from app.services.diagnostic_snapshot_store import persist_diagnostic_snapshot
 from app.services.insight_attribution import compute_single_layer_attribution
 from app.services.insight_cards import build_insight_card
 from app.services.insight_rules import evaluate_anomaly
@@ -33,6 +35,8 @@ def _append_monitor_report_audit_event(
     question: str,
     error_code: str | None = None,
     result_summary: dict | None = None,
+    audit_repo: AuditRepository | None = None,
+    connection=None,
 ) -> None:
     permission_context = _build_monitor_permission_context(tenant_id=tenant_id, principal_id=principal_id)
     summary = dict(result_summary or {})
@@ -49,7 +53,9 @@ def _append_monitor_report_audit_event(
             "conversation_id": "",
             "error_code": error_code,
             "result_summary": summary,
-        }
+        },
+        audit_repo=audit_repo,
+        connection=connection,
     )
 
 
@@ -78,6 +84,8 @@ def _create_default_report_snapshot(
     card: dict,
     event,
     attribution: dict,
+    repositories: DiagnosticSnapshotRepositories | None = None,
+    connection=None,
 ) -> dict:
     trace_id = card["trace_id"]
     dashboard_id = f"dash-{trace_id}"
@@ -87,7 +95,6 @@ def _create_default_report_snapshot(
         card=card,
         event=event,
     )
-    ReportIntentRepository().save(report_intent)
     report = build_diagnostic_report(
         tenant_id=tenant_id,
         principal_id=principal_id,
@@ -123,19 +130,21 @@ def _create_default_report_snapshot(
             "drivers": {"rows": [{"region": attribution["key"], "value": attribution["contribution"]}]},
         },
     )
-    DashboardRepository().save(
+    return persist_diagnostic_snapshot(
         tenant_id=tenant_id,
         principal_id=principal_id,
-        report_intent_id=report.report_intent_id,
-        dashboard=dashboard.model_dump(mode="python"),
-        dashboard_id=dashboard.id,
+        report_intent=report_intent,
+        dashboard=dashboard,
+        report=report,
+        repositories=repositories,
+        connection=connection,
     )
-    return DiagnosticReportRepository().save(report=report.model_dump(mode="python"))
 
 
 def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thresholds: dict) -> int:
     repo = InsightRepository()
     report_repo = DiagnosticReportRepository()
+    audit_repo = AuditRepository()
     generated = 0
 
     for snap in snapshots:
@@ -157,18 +166,21 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
         )
         card_payload = build_insight_card(event=event, attribution=attribution, trace_id=new_trace_id())
         card = repo.save_card(card_payload)
+        snapshot_repositories = prepare_diagnostic_snapshot_repositories()
 
         try:
             report_snapshot = report_repo.get_or_create_default_for_insight(
                 tenant_id="t-1",
                 principal_id="u-1",
                 source_ref=card["card_id"],
-                create_fn=lambda: _create_default_report_snapshot(
+                create_fn=lambda connection: _create_default_report_snapshot(
                     tenant_id="t-1",
                     principal_id="u-1",
                     card=card,
                     event=event,
                     attribution=attribution,
+                    repositories=snapshot_repositories,
+                    connection=connection,
                 ),
             )
         except Exception:
@@ -180,6 +192,7 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
                 question=card["suggested_next_question"],
                 error_code=DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED,
                 result_summary={"card_id": card["card_id"]},
+                audit_repo=audit_repo,
             )
             generated += 1
             continue
@@ -200,6 +213,7 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
                 "report_id": report_snapshot["id"],
                 "dashboard_id": report_snapshot["dashboard_id"],
             },
+            audit_repo=audit_repo,
         )
         generated += 1
 

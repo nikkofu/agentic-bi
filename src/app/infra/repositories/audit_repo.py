@@ -1,5 +1,6 @@
 import json
 
+from sqlalchemy.engine import Connection
 from sqlalchemy import Column
 from sqlalchemy import Integer
 from sqlalchemy import MetaData
@@ -51,9 +52,9 @@ class AuditRepository:
                         text(f"ALTER TABLE audit_events ADD COLUMN {column_name} {column_type}")
                     )
 
-    def save(self, record: dict) -> dict:
-        with self.engine.begin() as connection:
-            connection.execute(
+    def save(self, record: dict, connection: Connection | None = None) -> dict:
+        def _persist(active_connection: Connection) -> None:
+            active_connection.execute(
                 insert(audit_events).values(
                     trace_id=record["trace_id"],
                     status=record["status"],
@@ -69,4 +70,11 @@ class AuditRepository:
                     else None,
                 )
             )
+
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                _persist(owned_connection)
+        else:
+            _persist(connection)
+
         return record

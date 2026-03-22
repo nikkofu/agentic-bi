@@ -1,4 +1,7 @@
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -102,10 +105,12 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
 
     calls = {"count": 0}
 
-    def create_fn():
+    def create_fn(connection=None):
         calls["count"] += 1
         created = build_report_payload(report_id=f"dr-create-{calls['count']}", dashboard_id="dash-default")
-        return reports.save(created)
+        if connection is None:
+            return reports.save(created)
+        return reports.save(created, connection=connection)
 
     first = reports.get_or_create_default_for_insight(
         tenant_id="t-1",
@@ -122,6 +127,49 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
 
     assert first["id"] == second["id"] == "dr-create-1"
     assert calls["count"] == 1
+
+    with sqlite3.connect(db_path) as connection:
+        total_rows = connection.execute("SELECT COUNT(*) FROM diagnostic_reports").fetchone()[0]
+    assert total_rows == 1
+
+
+def test_report_repo_get_or_create_default_for_insight_is_idempotent_under_concurrency(tmp_path, monkeypatch):
+    db_path = tmp_path / "report-idempotent-concurrency.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    reports = DiagnosticReportRepository()
+    start_barrier = threading.Barrier(2)
+    call_lock = threading.Lock()
+    calls = {"count": 0}
+
+    def create_fn(connection=None):
+        with call_lock:
+            calls["count"] += 1
+            call_number = calls["count"]
+        time.sleep(0.1)
+        created = build_report_payload(
+            report_id=f"dr-concurrent-{call_number}",
+            dashboard_id=f"dash-concurrent-{call_number}",
+        )
+        if connection is None:
+            return reports.save(created)
+        return reports.save(created, connection=connection)
+
+    def fetch_or_create():
+        start_barrier.wait()
+        return reports.get_or_create_default_for_insight(
+            tenant_id="t-1",
+            principal_id="u-1",
+            source_ref="card-1",
+            create_fn=create_fn,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(fetch_or_create)
+        second_future = executor.submit(fetch_or_create)
+        first = first_future.result()
+        second = second_future.result()
+
+    assert first["id"] == second["id"]
 
     with sqlite3.connect(db_path) as connection:
         total_rows = connection.execute("SELECT COUNT(*) FROM diagnostic_reports").fetchone()[0]

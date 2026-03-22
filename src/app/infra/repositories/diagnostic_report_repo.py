@@ -3,6 +3,7 @@ from collections.abc import Callable
 from datetime import datetime
 from datetime import timezone
 
+from sqlalchemy.engine import Connection
 from sqlalchemy import Column
 from sqlalchemy import MetaData
 from sqlalchemy import String
@@ -36,9 +37,25 @@ class DiagnosticReportRepository:
         self.engine = get_engine(db_url)
         metadata.create_all(self.engine)
 
-    def save(self, report) -> dict:
+    def save(self, report, connection: Connection | None = None) -> dict:
         payload = report.model_dump(mode="python") if hasattr(report, "model_dump") else dict(report)
-        with self.engine.begin() as connection:
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                owned_connection.execute(
+                    insert(diagnostic_reports).values(
+                        id=payload["id"],
+                        tenant_id=payload["tenant_id"],
+                        principal_id=payload["principal_id"],
+                        source_kind=payload["source_kind"],
+                        source_ref=payload["source_ref"],
+                        snapshot_time=payload["snapshot_time"],
+                        status=payload["status"],
+                        dashboard_id=payload["dashboard_id"],
+                        report_intent_id=payload["report_intent_id"],
+                        payload=json.dumps(payload, ensure_ascii=False),
+                    )
+                )
+        else:
             connection.execute(
                 insert(diagnostic_reports).values(
                     id=payload["id"],
@@ -71,9 +88,24 @@ class DiagnosticReportRepository:
         return json.loads(row[0])
 
     def get_by_source_ref(
-        self, tenant_id: str, principal_id: str, source_kind: str, source_ref: str
+        self,
+        tenant_id: str,
+        principal_id: str,
+        source_kind: str,
+        source_ref: str,
+        connection: Connection | None = None,
     ) -> dict | None:
-        with self.engine.begin() as connection:
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                rows = owned_connection.execute(
+                    select(diagnostic_reports.c.payload).where(
+                        diagnostic_reports.c.tenant_id == tenant_id,
+                        diagnostic_reports.c.principal_id == principal_id,
+                        diagnostic_reports.c.source_kind == source_kind,
+                        diagnostic_reports.c.source_ref == source_ref,
+                    )
+                ).fetchall()
+        else:
             rows = connection.execute(
                 select(diagnostic_reports.c.payload).where(
                     diagnostic_reports.c.tenant_id == tenant_id,
@@ -94,19 +126,29 @@ class DiagnosticReportRepository:
         tenant_id: str,
         principal_id: str,
         source_ref: str,
-        create_fn: Callable[[], dict],
+        create_fn: Callable[[Connection], dict],
     ) -> dict:
         source_kind = "insight_card"
-        existing = self.get_by_source_ref(
-            tenant_id=tenant_id,
-            principal_id=principal_id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-        )
-        if existing is not None:
-            return existing
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                existing = self.get_by_source_ref(
+                    tenant_id=tenant_id,
+                    principal_id=principal_id,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    connection=connection,
+                )
+                if existing is not None:
+                    connection.commit()
+                    return existing
 
-        return create_fn()
+                created = create_fn(connection)
+                connection.commit()
+                return created
+            except Exception:
+                connection.rollback()
+                raise
 
     @staticmethod
     def _snapshot_time_sort_key(report: dict) -> datetime:

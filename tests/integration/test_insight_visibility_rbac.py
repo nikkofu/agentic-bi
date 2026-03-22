@@ -47,7 +47,11 @@ def test_insight_list_only_returns_in_scope_cards_and_exposes_report_links(tmp_p
     body = client.get("/v1/insights/cards", params={"user_id": "u-south", "tenant_id": "t-1"}).json()
     assert all(card["scope"]["region"] == "华南" for card in body["items"])
     assert all(card["card_id"].startswith("card-") for card in body["items"])
-    assert all(card["detail_url"] == f"/reports/{card['report_id']}" for card in body["items"])
+    assert all(
+        card["detail_url"]
+        == f"/reports/{card['report_id']}?tenant_id=t-1&user_id=u-south&principal_id=u-south"
+        for card in body["items"]
+    )
 
 
 def test_insight_list_returns_no_cards_for_unknown_user_scope(tmp_path, monkeypatch):
@@ -92,4 +96,8 @@ def test_insight_list_creates_distinct_reports_for_multiple_uncached_cards(tmp_p
     dashboard_ids = {item["dashboard_id"] for item in items}
     assert len(report_ids) == 2
     assert len(dashboard_ids) == 2
-    assert all(item["detail_url"] == f"/reports/{item['report_id']}" for item in items)
+    assert all(
+        item["detail_url"]
+        == f"/reports/{item['report_id']}?tenant_id=t-1&user_id=u-south&principal_id=u-south"
+        for item in items
+    )

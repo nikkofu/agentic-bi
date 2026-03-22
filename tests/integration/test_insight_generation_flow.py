@@ -14,6 +14,15 @@ import app.services.insight_monitor as insight_monitor
 client = TestClient(app)
 
 
+def count_rows_or_zero(connection: sqlite3.Connection, table_name: str) -> int:
+    try:
+        return connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return 0
+
+
 def test_monitor_generates_and_persists_insight_card(tmp_path, monkeypatch):
     db_path = tmp_path / "insights.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -167,4 +176,36 @@ def test_monitor_keeps_card_when_report_generation_fails(tmp_path, monkeypatch):
     assert permission_context["principal_id"] == "u-1"
     assert permission_context["role_scope"] == ["region:华东", "region:华南"]
     assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+    assert failed_event["error_code"] == "DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED"
+
+
+def test_monitor_report_failure_rolls_back_partial_snapshot_artifacts(tmp_path, monkeypatch):
+    db_path = tmp_path / "monitor-report-rollback.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+
+    def raise_report_save_failure(self, report, connection=None):
+        raise RuntimeError("report-save-failed")
+
+    monkeypatch.setattr(DiagnosticReportRepository, "save", raise_report_save_failure)
+
+    count = run_monitor_once(
+        snapshots=[
+            {"metric": "gross_margin_rate", "scope": {"region": "华东"}, "current_value": 0.24, "baseline_value": 0.30}
+        ],
+        abs_thresholds={"gross_margin_rate": 0.26},
+        delta_thresholds={"gross_margin_rate": 0.04},
+    )
+
+    assert count == 1
+    cards = InsightRepository().list_by_regions(["华东"])
+    assert cards[0]["report_id"] is None
+
+    with sqlite3.connect(db_path) as connection:
+        assert count_rows_or_zero(connection, "report_intents") == 0
+        assert count_rows_or_zero(connection, "dashboards") == 0
+        assert count_rows_or_zero(connection, "dashboard_revisions") == 0
+        assert count_rows_or_zero(connection, "diagnostic_reports") == 0
+
+    failed_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED")
     assert failed_event["error_code"] == "DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { fetchReport, resolveViewerContext } from "../api/client";
 import { DashboardPage } from "../components/DashboardPage";
@@ -33,18 +33,14 @@ export function ReportPageRoute() {
   const tenantId = searchParams.get("tenant_id") ?? undefined;
   const userId = searchParams.get("user_id") ?? undefined;
   const principalId = searchParams.get("principal_id") ?? undefined;
-  const viewerContext = useMemo(
-    () =>
-      resolveViewerContext({
-        tenant_id: tenantId,
-        user_id: userId,
-        principal_id: principalId,
-      }),
-    [tenantId, userId, principalId],
-  );
 
   useEffect(() => {
     let isActive = true;
+    const viewerContext = resolveViewerContext({
+      tenant_id: tenantId,
+      user_id: userId,
+      principal_id: principalId,
+    });
 
     if (reportId.length === 0) {
       setDocument(null);
@@ -78,7 +74,7 @@ export function ReportPageRoute() {
     return () => {
       isActive = false;
     };
-  }, [reportId, viewerContext]);
+  }, [principalId, reportId, tenantId, userId]);
 
   if (isLoading) {
     return (
