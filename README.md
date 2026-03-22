@@ -44,7 +44,7 @@ This phase delivers a **read-only viewer**, not a full dashboard editor. It inte
 - Reporting protocol layer with `ReportIntent`, `DashboardSpec`, and `EditorState` models
 - Reporting endpoints for generating report intents, assembling dashboard previews, persisting dashboards, and fetching saved dashboards
 - SQLite-backed dashboard persistence with revision tracking, audit logging, and permission-context checks to prevent access widening or drift leakage
-- Read-only Vite + React viewer with routes for live preview and saved-dashboard rendering
+- Read-only Vite + React viewer with routes for live preview, canonical saved-report rendering, and lower-level saved-dashboard rendering
 - Frontend widget rendering for `metric_card`, `chart`, `insight`, and `text` widgets through an ECharts adapter
 
 ## Backend run
