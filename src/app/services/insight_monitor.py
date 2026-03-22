@@ -1,11 +1,102 @@
+from app.api.reporting import build_permission_context
+from app.infra.repositories.dashboard_repo import DashboardRepository
+from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
+from app.infra.repositories.insight_repo import InsightRepository
+from app.services.access_policy import resolve_allowed_regions
+from app.services.audit_log import append_audit_event
+from app.services.diagnostic_dashboard_assembler import assemble_diagnostic_dashboard
+from app.services.diagnostic_report_builder import build_diagnostic_report
 from app.services.insight_attribution import compute_single_layer_attribution
 from app.services.insight_cards import build_insight_card
 from app.services.insight_rules import evaluate_anomaly
-from app.infra.repositories.insight_repo import InsightRepository
+from app.services.report_intent_builder import build_report_intent
+
+
+def _build_monitor_report_intent(*, tenant_id: str, principal_id: str, card: dict, event) -> object:
+    permission_context = build_permission_context(
+        principal_id=principal_id,
+        role_scope=[f"region:{region}" for region in resolve_allowed_regions(user_id=principal_id, tenant_id=tenant_id)],
+        row_level_policy_ref=f"sales-region:{principal_id}",
+    )
+    return build_report_intent(
+        question=card["suggested_next_question"],
+        tenant_id=tenant_id,
+        dataset_id="sales-fixture",
+        trace_id=card["trace_id"],
+        permission_context=permission_context,
+        plan={
+            "metric": event.metric,
+            "filters": event.scope,
+            "time_window": "last_month",
+            "group_by": ["month"],
+        },
+        result={"metric": event.metric, "time_window": "last_month"},
+    )
+
+
+def _create_default_report_snapshot(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    card: dict,
+    event,
+    attribution: dict,
+) -> dict:
+    trace_id = card["trace_id"]
+    dashboard_id = f"dash-{trace_id}"
+    report = build_diagnostic_report(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        source_kind="insight_card",
+        source_ref=card["card_id"],
+        report_intent=_build_monitor_report_intent(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            card=card,
+            event=event,
+        ),
+        metric_result={"metric": card["metric"], "time_window": "last_month"},
+        finding_inputs=[
+            {
+                "kind": "trend",
+                "title": "异常延续",
+                "statement": card["summary"],
+                "evidence_refs": [trace_id],
+            }
+        ],
+        recommendations=[
+            {
+                "kind": "question",
+                "label": "继续诊断",
+                "question": card["suggested_next_question"],
+                "rationale": "从洞察卡片继续分析",
+            }
+        ],
+        dashboard_id=dashboard_id,
+    )
+    dashboard = assemble_diagnostic_dashboard(
+        report=report,
+        result_bindings={
+            "overview": {
+                "value": event.current_value,
+                "rows": [{"region": card["scope"]["region"], "value": event.current_value}],
+            },
+            "drivers": {"rows": [{"region": attribution["key"], "value": attribution["contribution"]}]},
+        },
+    )
+    DashboardRepository().save(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        report_intent_id=report.report_intent_id,
+        dashboard=dashboard.model_dump(mode="python"),
+        dashboard_id=dashboard.id,
+    )
+    return DiagnosticReportRepository().save(report=report.model_dump(mode="python"))
 
 
 def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thresholds: dict) -> int:
     repo = InsightRepository()
+    report_repo = DiagnosticReportRepository()
     generated = 0
 
     for snap in snapshots:
@@ -25,8 +116,54 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
             [{"region": snap["scope"].get("region", "全域"), "value": event.delta}],
             dimension="region",
         )
-        card = build_insight_card(event=event, attribution=attribution, trace_id=f"insight-{generated+1}")
-        repo.save_card(card)
+        card_payload = build_insight_card(event=event, attribution=attribution, trace_id=f"insight-{generated + 1}")
+        card = repo.save_card(card_payload)
+
+        try:
+            report_snapshot = report_repo.get_or_create_default_for_insight(
+                tenant_id="t-1",
+                principal_id="u-1",
+                source_ref=card["card_id"],
+                create_fn=lambda: _create_default_report_snapshot(
+                    tenant_id="t-1",
+                    principal_id="u-1",
+                    card=card,
+                    event=event,
+                    attribution=attribution,
+                ),
+            )
+        except Exception as exc:
+            append_audit_event(
+                {
+                    "trace_id": card["trace_id"],
+                    "status": "DIAGNOSTIC_REPORT_GENERATE_FAILED",
+                    "question": card["suggested_next_question"],
+                    "conversation_id": "",
+                    "error_code": str(exc),
+                    "result_summary": {"card_id": card["card_id"]},
+                }
+            )
+            generated += 1
+            continue
+
+        repo.attach_report(
+            card_id=card["card_id"],
+            report_id=report_snapshot["id"],
+            dashboard_id=report_snapshot["dashboard_id"],
+        )
+        append_audit_event(
+            {
+                "trace_id": card["trace_id"],
+                "status": "DIAGNOSTIC_REPORT_GENERATED",
+                "question": card["suggested_next_question"],
+                "conversation_id": "",
+                "result_summary": {
+                    "card_id": card["card_id"],
+                    "report_id": report_snapshot["id"],
+                    "dashboard_id": report_snapshot["dashboard_id"],
+                },
+            }
+        )
         generated += 1
 
     return generated

@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from app.domain.insight_models import AnomalyEvent
 
 
@@ -15,6 +17,7 @@ def build_insight_card(*, event: AnomalyEvent, attribution: dict, trace_id: str)
     suggested_next_question = f"请分析{attribution.get('key', '')}在该异常中的主要驱动因素"
 
     return {
+        "card_id": f"card-{uuid4().hex[:12]}",
         "trace_id": trace_id,
         "metric": event.metric,
         "scope": event.scope,
@@ -22,4 +25,7 @@ def build_insight_card(*, event: AnomalyEvent, attribution: dict, trace_id: str)
         "summary": summary,
         "attribution": attribution,
         "suggested_next_question": suggested_next_question,
+        "report_id": None,
+        "dashboard_id": None,
+        "detail_url": None,
     }
