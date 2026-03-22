@@ -1,0 +1,71 @@
+:root {
+  font-family: "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.dashboard-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.dashboard-header {
+  margin-bottom: 20px;
+}
+
+.dashboard-eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.dashboard-empty-state {
+  margin: 12px 0 0;
+  max-width: 680px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.dashboard-page h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.widget-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.widget-card {
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.widget-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
