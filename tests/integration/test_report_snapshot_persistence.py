@@ -234,3 +234,63 @@ def test_insight_repo_attach_report_and_get_by_card_id(tmp_path, monkeypatch):
 
     with pytest.raises(KeyError):
         repo.get(card_id=saved["card_id"], allowed_regions=["华南"])
+
+
+def test_insight_repo_bootstraps_legacy_table_schema(tmp_path, monkeypatch):
+    db_path = tmp_path / "insight-legacy-schema.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE insight_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                attribution TEXT NOT NULL,
+                suggested_next_question TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO insight_cards (
+                trace_id, metric, scope, severity, summary, attribution, suggested_next_question
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-trace-1",
+                "gross_margin_rate",
+                '{"region":"华东"}',
+                "P1",
+                "legacy-summary",
+                '{"key":"华东","contribution":-0.06}',
+                "legacy-next",
+            ),
+        )
+        connection.commit()
+
+    repo = InsightRepository()
+
+    items = repo.list_by_regions(["华东"])
+    assert len(items) == 1
+    assert items[0]["card_id"].startswith("card-")
+
+    saved = repo.save_card(
+        {
+            "trace_id": "new-trace-1",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "severity": "P2",
+            "summary": "new-summary",
+            "attribution": {"key": "华东", "contribution": -0.03},
+            "suggested_next_question": "new-next",
+        }
+    )
+    assert saved["card_id"].startswith("card-")
+
+    all_items = repo.list_by_regions(["华东"])
+    assert len(all_items) == 2

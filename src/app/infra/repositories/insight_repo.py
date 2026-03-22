@@ -29,6 +29,7 @@ class InsightRepository:
     def __init__(self, db_url: str | None = None):
         self.engine = get_engine(db_url)
         metadata.create_all(self.engine)
+        self._bootstrap_schema()
 
     def save_card(self, card: dict) -> dict:
         card_id = card.get("card_id") or self._fallback_card_id()
@@ -138,3 +139,38 @@ class InsightRepository:
         if report_id:
             return f"/reports/{report_id}"
         return None
+
+    def _bootstrap_schema(self) -> None:
+        required_columns = {
+            "card_id": "TEXT",
+            "report_id": "TEXT",
+            "dashboard_id": "TEXT",
+            "detail_url": "TEXT",
+        }
+        with self.engine.begin() as connection:
+            rows = connection.exec_driver_sql("PRAGMA table_info(insight_cards)").fetchall()
+            existing_columns = {row[1] for row in rows}
+            for column_name, column_type in required_columns.items():
+                if column_name in existing_columns:
+                    continue
+                connection.exec_driver_sql(
+                    f"ALTER TABLE insight_cards ADD COLUMN {column_name} {column_type}"
+                )
+
+            # Use deterministic, row-id-based legacy IDs so old rows become addressable.
+            connection.exec_driver_sql(
+                """
+                UPDATE insight_cards
+                SET card_id = 'card-legacy-' || id
+                WHERE card_id IS NULL OR TRIM(card_id) = ''
+                """
+            )
+            connection.exec_driver_sql(
+                """
+                UPDATE insight_cards
+                SET detail_url = '/reports/' || report_id
+                WHERE report_id IS NOT NULL
+                  AND TRIM(report_id) <> ''
+                  AND (detail_url IS NULL OR TRIM(detail_url) = '')
+                """
+            )
