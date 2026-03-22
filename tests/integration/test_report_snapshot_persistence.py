@@ -61,6 +61,7 @@ def test_report_repo_persists_metadata_for_owner(tmp_path, monkeypatch):
         principal_id="u-1",
         report_intent_id="ri-1",
         dashboard=build_dashboard_payload("dash-keep-me"),
+        dashboard_id="dash-keep-me",
     )
     assert saved_dashboard["dashboard_id"] == "dash-keep-me"
 
@@ -123,6 +124,34 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
     with sqlite3.connect(db_path) as connection:
         total_rows = connection.execute("SELECT COUNT(*) FROM diagnostic_reports").fetchone()[0]
     assert total_rows == 1
+
+
+def test_dashboard_repo_generates_fresh_ids_without_explicit_dashboard_id(tmp_path, monkeypatch):
+    db_path = tmp_path / "dashboard-id-generation.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    dashboards = DashboardRepository()
+    preview_payload = build_dashboard_payload("dash-preview-1")
+
+    first = dashboards.save(
+        tenant_id="t-1",
+        principal_id="u-1",
+        report_intent_id="ri-1",
+        dashboard=preview_payload,
+    )
+    second = dashboards.save(
+        tenant_id="t-1",
+        principal_id="u-1",
+        report_intent_id="ri-1",
+        dashboard=preview_payload,
+    )
+
+    assert first["dashboard_id"].startswith("dash-")
+    assert second["dashboard_id"].startswith("dash-")
+    assert first["dashboard_id"] != "dash-preview-1"
+    assert second["dashboard_id"] != "dash-preview-1"
+    assert first["dashboard_id"] != second["dashboard_id"]
+    assert first["dashboard"]["id"] == first["dashboard_id"]
+    assert second["dashboard"]["id"] == second["dashboard_id"]
 
 
 def test_report_repo_allows_multiple_on_demand_snapshots_for_same_source_ref(tmp_path, monkeypatch):

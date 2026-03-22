@@ -48,7 +48,7 @@ class DashboardRepository:
         dashboard: dict,
         dashboard_id: str | None = None,
     ) -> dict:
-        resolved_dashboard_id = dashboard_id or dashboard.get("id") or f"dash-{uuid4().hex[:12]}"
+        resolved_dashboard_id = dashboard_id if dashboard_id is not None else f"dash-{uuid4().hex[:12]}"
         revision_id = f"rev-{uuid4().hex[:12]}"
         persisted_dashboard = dict(dashboard)
         persisted_dashboard["id"] = resolved_dashboard_id
