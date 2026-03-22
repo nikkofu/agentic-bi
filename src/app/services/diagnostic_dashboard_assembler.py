@@ -29,6 +29,15 @@ def _materialized_binding(
     }
 
 
+def _actions_text(report: DiagnosticReport) -> str:
+    if not report.recommendations:
+        return ""
+    return "\n".join(
+        f"{index}. {recommendation.label}: {recommendation.question}"
+        for index, recommendation in enumerate(report.recommendations, start=1)
+    )
+
+
 def build_overview_page(report: DiagnosticReport) -> DashboardPage:
     source_ref = "overview"
     section = DashboardSection(
@@ -93,7 +102,7 @@ def build_drivers_page(report: DiagnosticReport) -> DashboardPage:
 
 
 def build_actions_page(report: DiagnosticReport) -> DashboardPage:
-    source_ref = "overview"
+    source_ref = "actions"
     section = DashboardSection(
         id=f"section-actions-{report.id}",
         title="Actions",
@@ -131,6 +140,11 @@ def assemble_diagnostic_dashboard(
         source_ref="drivers",
         payload=result_bindings["drivers"],
     )
+    actions_binding = _materialized_binding(
+        report=report,
+        source_ref="actions",
+        payload={"text": _actions_text(report)},
+    )
 
     return DashboardSpec(
         id=report.dashboard_id,
@@ -140,7 +154,7 @@ def assemble_diagnostic_dashboard(
         theme={"name": "paper"},
         refresh_policy={"mode": "snapshot"},
         variables=[],
-        data_bindings=[overview_binding, drivers_binding],
+        data_bindings=[overview_binding, drivers_binding, actions_binding],
         interactions=[],
         pages=[build_overview_page(report), build_drivers_page(report), build_actions_page(report)],
     )

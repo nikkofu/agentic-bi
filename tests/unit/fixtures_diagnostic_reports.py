@@ -1,4 +1,8 @@
-from app.domain.diagnostic_report_models import DiagnosticReport, DiagnosticReportSummary
+from app.domain.diagnostic_report_models import (
+    DiagnosticRecommendation,
+    DiagnosticReport,
+    DiagnosticReportSummary,
+)
 from app.domain.reporting_models import PermissionContext, ReportIntent, SemanticQuery
 
 
@@ -50,7 +54,14 @@ def diagnostic_report_fixture(*, dashboard_id: str = "dash-1") -> DiagnosticRepo
             headline="毛利率低于基线 6 个点",
         ),
         findings=[],
-        recommendations=[],
+        recommendations=[
+            DiagnosticRecommendation(
+                kind="question",
+                label="继续分析渠道",
+                question="请分析渠道影响",
+                rationale="渠道变化可解释毛利变化",
+            )
+        ],
         dashboard_id=dashboard_id,
         report_intent_id="ri-fixture",
         trace={"trace_id": "trace-fixture"},
