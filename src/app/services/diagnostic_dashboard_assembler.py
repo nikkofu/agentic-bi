@@ -27,7 +27,7 @@ def build_overview_page(report: DiagnosticReport) -> DashboardPage:
                 kind="metric_card",
                 title="核心指标",
                 presentation=WidgetPresentation(family="kpi", variant="primary"),
-                binding=WidgetBinding(source_ref=_binding_ref(report, source_ref), value_path="value"),
+                binding=WidgetBinding(source_ref=source_ref, value_path="value"),
             ),
             DashboardWidget(
                 id=f"widget-overview-chart-{report.id}",
@@ -38,7 +38,7 @@ def build_overview_page(report: DiagnosticReport) -> DashboardPage:
                     variant="auto",
                     config={"metric": report.summary.metric},
                 ),
-                binding=WidgetBinding(source_ref=_binding_ref(report, source_ref), value_path="rows"),
+                binding=WidgetBinding(source_ref=source_ref, value_path="rows"),
             ),
         ],
     )
@@ -66,7 +66,7 @@ def build_drivers_page(report: DiagnosticReport) -> DashboardPage:
                     variant="auto",
                     config={"metric": report.summary.metric},
                 ),
-                binding=WidgetBinding(source_ref=_binding_ref(report, source_ref), value_path="rows"),
+                binding=WidgetBinding(source_ref=source_ref, value_path="rows"),
             )
         ],
     )
@@ -79,6 +79,7 @@ def build_drivers_page(report: DiagnosticReport) -> DashboardPage:
 
 
 def build_actions_page(report: DiagnosticReport) -> DashboardPage:
+    source_ref = "overview"
     section = DashboardSection(
         id=f"section-actions-{report.id}",
         title="Actions",
@@ -89,7 +90,7 @@ def build_actions_page(report: DiagnosticReport) -> DashboardPage:
                 kind="text",
                 title="Recommended Actions",
                 presentation=WidgetPresentation(family="narrative", variant="secondary"),
-                binding=WidgetBinding(source_ref=_binding_ref(report, "overview")),
+                binding=WidgetBinding(source_ref=source_ref),
             )
         ],
     )
