@@ -250,3 +250,17 @@ def test_get_report_intent_rejects_principal_mismatch():
         params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-other"},
     )
     assert resp.status_code == 400
+
+
+def test_assemble_dashboard_rejects_unsupported_semantic_filter_operator():
+    client = TestClient(app)
+    intent = build_intent_payload()
+    intent["semantic_queries"][0]["filters"] = [{"field": "region", "op": "!=", "value": "华南"}]
+
+    resp = client.post(
+        "/v1/dashboards:assemble",
+        json={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1", "intent": intent},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error_code"] == "UNSUPPORTED_SEMANTIC_FILTER"

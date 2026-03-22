@@ -22,6 +22,8 @@ from app.services.report_intent_builder import build_report_intent
 
 router = APIRouter(prefix="/v1")
 PRINCIPAL_MISMATCH = "PRINCIPAL_MISMATCH"
+UNSUPPORTED_SEMANTIC_FILTER = "UNSUPPORTED_SEMANTIC_FILTER"
+SUPPORTED_SEMANTIC_FILTER_FIELDS = {"region"}
 
 
 class ReportingGenerateRequest(BaseModel):
@@ -121,12 +123,21 @@ def execute_reporting_preview(req: ReportingGenerateRequest, *, allowed_regions:
 def _build_query_plan_from_semantic_query(query) -> QueryPlan:
     filters = {}
     for query_filter in query.filters:
-        if query_filter.get("op") != "=":
-            continue
+        if not isinstance(query_filter, dict):
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+
         field = query_filter.get("field")
+        op = query_filter.get("op")
         value = query_filter.get("value")
-        if isinstance(field, str) and isinstance(value, str):
-            filters[field] = value
+
+        if op != "=":
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+        if not isinstance(field, str) or field not in SUPPORTED_SEMANTIC_FILTER_FIELDS:
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+        if not isinstance(value, str):
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+
+        filters[field] = value
 
     return QueryPlan(
         metric=query.measures[0] if query.measures else "",
