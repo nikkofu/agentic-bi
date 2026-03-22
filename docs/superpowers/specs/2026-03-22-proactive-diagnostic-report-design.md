@@ -43,7 +43,7 @@
 - “自动图形报表”与“结构化诊断报告”在同一协议下演进
 
 缺点：
-- 需要给现有 reporting 协议补少量 diagnostic metadata
+- 需要新增一层 `DiagnosticReport` 元信息模型，并处理它与现有 reporting protocol 的关联
 - viewer 需要从“页面平铺”提升到“多页面导航”
 
 ### 方案 B：单独 diagnostic schema + 单独 viewer
@@ -255,6 +255,7 @@
 ### 7.1 Insight 关联详情
 
 保留 `GET /v1/insights/cards`，但每个 item 需增加：
+- `card_id`
 - `report_id`
 - `dashboard_id`
 - `detail_url`
@@ -283,8 +284,23 @@
   "tenant_id": "t-1",
   "user_id": "u-1",
   "principal_id": "u-1",
-  "mode": "from_insight | direct",
+  "mode": "from_insight",
   "insight_card_id": "card-1",
+  "metric": null,
+  "scope": null,
+  "time_window": null
+}
+```
+
+direct generate 示例：
+
+```json
+{
+  "tenant_id": "t-1",
+  "user_id": "u-1",
+  "principal_id": "u-1",
+  "mode": "direct",
+  "insight_card_id": null,
   "metric": "gross_margin_rate",
   "scope": {"region": "华东"},
   "time_window": "last_month"
