@@ -1,0 +1,56 @@
+import type { DashboardDocument, ReportIntent, ReportPreviewPayload } from "../types/reporting";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const DEFAULT_VIEWER_CONTEXT = {
+  tenant_id: "t-1",
+  user_id: "u-1",
+  principal_id: "u-1",
+};
+
+async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init);
+  const body = (await response.json().catch(() => null)) as T | { detail?: { error_code?: string } } | null;
+
+  if (!response.ok) {
+    const errorCode =
+      body !== null &&
+      typeof body === "object" &&
+      "detail" in body &&
+      body.detail !== undefined &&
+      typeof body.detail === "object" &&
+      body.detail !== null &&
+      "error_code" in body.detail &&
+      typeof body.detail.error_code === "string"
+        ? body.detail.error_code
+        : `HTTP_${response.status}`;
+    throw new Error(errorCode);
+  }
+
+  return body as T;
+}
+
+export async function fetchPreview(question: string): Promise<ReportPreviewPayload> {
+  const intent = await fetchJson<ReportIntent>(`${API_BASE_URL}/v1/report-intents:generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...DEFAULT_VIEWER_CONTEXT,
+      conversation_id: "preview-session",
+      question,
+    }),
+  });
+
+  return fetchJson<ReportPreviewPayload>(`${API_BASE_URL}/v1/dashboards:assemble`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...DEFAULT_VIEWER_CONTEXT,
+      intent,
+    }),
+  });
+}
+
+export async function fetchDashboard(dashboardId: string): Promise<DashboardDocument> {
+  const params = new URLSearchParams(DEFAULT_VIEWER_CONTEXT);
+  return fetchJson<DashboardDocument>(`${API_BASE_URL}/v1/dashboards/${dashboardId}?${params.toString()}`);
+}

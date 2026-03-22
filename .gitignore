@@ -3,3 +3,6 @@
 .pytest_cache/
 __pycache__/
 agentic_bi.db
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

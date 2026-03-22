@@ -1,4 +1,5 @@
 import sqlite3
+from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
@@ -6,6 +7,125 @@ from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 
 client = TestClient(app)
+
+
+def _build_assemble_intent_payload() -> dict:
+    return {
+        "id": "ri-audit-1",
+        "version": "1.0",
+        "tenant_id": "t-1",
+        "dataset_id": "sales-fixture",
+        "source": "chat",
+        "question": "上个月华东区毛利率是多少？",
+        "goal": "answer question",
+        "permission_context": {
+            "principal_id": "u-1",
+            "role_scope": ["region:华东", "region:华南"],
+            "row_level_policy_ref": "sales-region:u-1",
+        },
+        "semantic_queries": [
+            {
+                "id": "sq-audit-1",
+                "kind": "metric_query",
+                "measures": ["gross_margin_rate"],
+                "dimensions": [],
+                "filters": [{"field": "region", "op": "=", "value": "华东"}],
+                "time": {"window": "last_month"},
+                "comparison": None,
+                "sort": None,
+                "limit": None,
+                "display_hint": {},
+            }
+        ],
+        "explanations": [{"id": "why-chart", "type": "chart_choice_reason", "content": "auto"}],
+        "constraints": {},
+        "trace": {"trace_id": "trace-audit-1"},
+    }
+
+
+def _build_dashboard_save_payload() -> dict:
+    return {
+        "tenant_id": "t-1",
+        "user_id": "u-1",
+        "principal_id": "u-1",
+        "report_intent": {
+            "id": "ri-dashboard-audit-1",
+            "version": "1.0",
+            "tenant_id": "t-1",
+            "dataset_id": "sales-fixture",
+            "source": "chat",
+            "question": "上个月华东区毛利率是多少？",
+            "goal": "answer question",
+            "permission_context": {
+                "principal_id": "u-1",
+                "role_scope": ["region:华东", "region:华南"],
+                "row_level_policy_ref": "sales-region:u-1",
+            },
+            "semantic_queries": [
+                {
+                    "id": "sq-dashboard-audit-1",
+                    "kind": "metric_query",
+                    "measures": ["gross_margin_rate"],
+                    "dimensions": [],
+                    "filters": [{"field": "region", "op": "=", "value": "华东"}],
+                    "time": {"window": "last_month"},
+                    "comparison": None,
+                    "sort": None,
+                    "limit": None,
+                    "display_hint": {},
+                }
+            ],
+            "explanations": [{"id": "why-chart", "type": "chart_choice_reason", "content": "auto"}],
+            "constraints": {},
+            "trace": {"trace_id": "trace-dashboard-audit-1"},
+        },
+        "dashboard": {
+            "id": "dash-preview-dashboard-audit-1",
+            "version": "1.0",
+            "title": "毛利率预览",
+            "description": "preview",
+            "theme": {"name": "paper"},
+            "refresh_policy": {"mode": "manual"},
+            "variables": [],
+            "data_bindings": [
+                {
+                    "id": "binding-dashboard-audit-1",
+                    "source_ref": "sq-dashboard-audit-1",
+                    "kind": "materialized_result",
+                    "value": 0.31,
+                    "rows": [{"region": "华东", "gross_margin_rate": 0.31}],
+                    "insight": "auto",
+                }
+            ],
+            "interactions": [],
+            "pages": [
+                {
+                    "id": "page-dashboard-audit-1",
+                    "title": "Overview",
+                    "layout": {"columns": 12},
+                    "sections": [
+                        {
+                            "id": "section-dashboard-audit-1",
+                            "title": "Summary",
+                            "layout": {"columns": 12},
+                            "widgets": [
+                                {
+                                    "id": "widget-dashboard-audit-1",
+                                    "kind": "metric_card",
+                                    "title": "核心指标",
+                                    "presentation": {"family": "kpi", "variant": "primary", "config": {}},
+                                    "binding": {
+                                        "source_ref": "sq-dashboard-audit-1",
+                                        "value_path": "value",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
 
 
 def test_chat_query_persists_audit_record(tmp_path, monkeypatch):
@@ -82,3 +202,149 @@ def test_permission_denied_request_is_audited(tmp_path, monkeypatch):
     assert '"metric": "gross_margin_rate"' in query_plan
     assert response_type is None
     assert error_code == "PERMISSION_DENIED"
+
+
+def test_reporting_endpoints_persist_success_and_failure_audit_records(tmp_path, monkeypatch):
+    db_path = tmp_path / "reporting-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+
+    generate_ok = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "conversation_id": "c-report-audit",
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert generate_ok.status_code == 200
+    intent_id = generate_ok.json()["id"]
+
+    generate_bad = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-other",
+            "conversation_id": "c-report-audit-mismatch",
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert generate_bad.status_code == 400
+
+    get_ok = client.get(
+        f"/v1/report-intents/{intent_id}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
+    )
+    assert get_ok.status_code == 200
+
+    get_denied = client.get(
+        f"/v1/report-intents/{intent_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert get_denied.status_code == 403
+
+    assemble_ok = client.post(
+        "/v1/dashboards:assemble",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "intent": _build_assemble_intent_payload(),
+        },
+    )
+    assert assemble_ok.status_code == 200
+
+    assemble_denied = client.post(
+        "/v1/dashboards:assemble",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-south",
+            "principal_id": "u-south",
+            "intent": _build_assemble_intent_payload(),
+        },
+    )
+    assert assemble_denied.status_code == 403
+
+    statuses = {event["status"] for event in _AUDIT_EVENTS}
+    assert "REPORT_INTENT_GENERATED" in statuses
+    assert "REPORT_INTENT_GENERATE_FAILED" in statuses
+    assert "REPORT_INTENT_FETCHED" in statuses
+    assert "REPORT_INTENT_FETCH_DENIED" in statuses
+    assert "DASHBOARD_PREVIEW_ASSEMBLED" in statuses
+    assert "DASHBOARD_PREVIEW_ASSEMBLE_FAILED" in statuses
+
+    assembled_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DASHBOARD_PREVIEW_ASSEMBLED")
+    permission_context = assembled_event["result_summary"]["permission_context"]
+    assert permission_context["principal_id"] == "u-1"
+    assert permission_context["role_scope"] == ["region:华东", "region:华南"]
+    assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT status, result_summary, error_code
+            FROM audit_events
+            """
+        ).fetchall()
+    db_statuses = {row[0] for row in rows}
+    assert "REPORT_INTENT_GENERATED" in db_statuses
+    assert "REPORT_INTENT_GENERATE_FAILED" in db_statuses
+    assert "REPORT_INTENT_FETCHED" in db_statuses
+    assert "REPORT_INTENT_FETCH_DENIED" in db_statuses
+    assert "DASHBOARD_PREVIEW_ASSEMBLED" in db_statuses
+    assert "DASHBOARD_PREVIEW_ASSEMBLE_FAILED" in db_statuses
+
+
+def test_dashboard_endpoints_persist_success_and_failure_audit_records(tmp_path, monkeypatch):
+    db_path = tmp_path / "dashboard-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+
+    save_ok = client.post("/v1/dashboards", json=_build_dashboard_save_payload())
+    assert save_ok.status_code == 201
+    dashboard_id = save_ok.json()["dashboard_id"]
+
+    fetch_ok = client.get(
+        f"/v1/dashboards/{dashboard_id}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
+    )
+    assert fetch_ok.status_code == 200
+
+    save_bad_payload = deepcopy(_build_dashboard_save_payload())
+    save_bad_payload["report_intent"]["permission_context"]["role_scope"] = ["region:华北"]
+    save_bad = client.post("/v1/dashboards", json=save_bad_payload)
+    assert save_bad.status_code == 403
+
+    fetch_denied = client.get(
+        f"/v1/dashboards/{dashboard_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert fetch_denied.status_code == 403
+
+    statuses = {event["status"] for event in _AUDIT_EVENTS}
+    assert "DASHBOARD_SAVED" in statuses
+    assert "DASHBOARD_SAVE_FAILED" in statuses
+    assert "DASHBOARD_FETCHED" in statuses
+    assert "DASHBOARD_FETCH_DENIED" in statuses
+
+    saved_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DASHBOARD_SAVED")
+    permission_context = saved_event["result_summary"]["permission_context"]
+    assert permission_context["principal_id"] == "u-1"
+    assert permission_context["role_scope"] == ["region:华东", "region:华南"]
+    assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT status, result_summary, error_code
+            FROM audit_events
+            """
+        ).fetchall()
+    db_statuses = {row[0] for row in rows}
+    assert "DASHBOARD_SAVED" in db_statuses
+    assert "DASHBOARD_SAVE_FAILED" in db_statuses
+    assert "DASHBOARD_FETCHED" in db_statuses
+    assert "DASHBOARD_FETCH_DENIED" in db_statuses

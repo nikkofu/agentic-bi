@@ -2,16 +2,15 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.domain.metrics_catalog import GROUP_DIMENSION_SUGGESTION_MAP, GROUP_DIMENSION_SUGGESTIONS, METRIC_ALIASES, PRIMARY_METRIC_SUGGESTIONS
+from app.domain.metrics_catalog import GROUP_DIMENSION_SUGGESTION_MAP, GROUP_DIMENSION_SUGGESTIONS, PRIMARY_METRIC_SUGGESTIONS
 from app.domain.models import ValidationErrorCode
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event, new_trace_id
-from app.services.conversation_memory import apply_followup, get_last_plan, save_last_plan
-from app.services.intent_parser import parse_compare_to, parse_group_by, parse_intent, parse_time_window
+from app.services.conversation_memory import save_last_plan
+from app.services.query_plan_resolver import resolve_plan_for_question
 from app.services.query_executor import execute_query
-from app.services.query_planner import build_query_plan
 from app.services.query_validator import validate_plan
-from app.services.response_builder import build_response
+from app.services.response_builder import build_response_with_reporting
 
 router = APIRouter(prefix="/v1/chat")
 
@@ -23,27 +22,6 @@ class QueryRequest(BaseModel):
     conversation_id: str
 
 
-def _is_followup_question(question: str, has_previous_plan: bool) -> bool:
-    if not has_previous_plan:
-        return False
-
-    has_metric_alias = any(alias in question for alias in METRIC_ALIASES)
-    has_explicit_scope = any(token in question for token in ["华东", "华南"])
-    has_explicit_time = parse_time_window(question) != "current"
-    has_followup_cue = any(token in question for token in ["那", "呢", "按月"])
-    has_compare_phrase = bool(parse_compare_to(question))
-    has_grouping_request = bool(parse_group_by(question))
-
-    if has_metric_alias and not has_explicit_scope and not has_explicit_time:
-        return True
-    if has_metric_alias and (has_followup_cue or has_compare_phrase or has_grouping_request) and not has_explicit_time:
-        return True
-    if has_metric_alias:
-        return False
-
-    return has_explicit_scope or has_followup_cue or has_compare_phrase or has_grouping_request
-
-
 def _build_result_summary(result: dict) -> dict:
     return {
         "metric": result.get("metric"),
@@ -53,6 +31,14 @@ def _build_result_summary(result: dict) -> dict:
         "compare_to": result.get("compare_to"),
         "series_points": len(result.get("series", [])),
     }
+
+
+def _normalize_dashboard_binding_kinds(dashboard_payload: dict) -> dict:
+    bindings = dashboard_payload.get("data_bindings", [])
+    for binding in bindings:
+        if binding.get("kind") == "materialized":
+            binding["kind"] = "materialized_result"
+    return dashboard_payload
 
 
 def _looks_like_metric_request(question: str) -> bool:
@@ -116,14 +102,13 @@ def _build_validation_error_content(error_code: str, trace_id: str, plan=None, q
 @router.post("/query")
 def query(req: QueryRequest):
     trace_id = new_trace_id()
-    previous_plan = get_last_plan(req.tenant_id, req.user_id, req.conversation_id)
     allowed_regions = resolve_allowed_regions(req.user_id, req.tenant_id)
-
-    if _is_followup_question(req.question, previous_plan is not None):
-        plan = apply_followup(req.question, previous_plan)
-    else:
-        intent = parse_intent(req.question)
-        plan = build_query_plan(intent)
+    plan = resolve_plan_for_question(
+        tenant_id=req.tenant_id,
+        user_id=req.user_id,
+        conversation_id=req.conversation_id,
+        question=req.question,
+    )
 
     if not plan.metric and not _looks_like_metric_request(req.question):
         save_last_plan(req.tenant_id, req.user_id, req.conversation_id, plan)
@@ -184,8 +169,28 @@ def query(req: QueryRequest):
     result = execute_query(plan, scope={"allowed_regions": allowed_regions})
     result["has_time_series"] = bool(result.get("series"))
     result["has_rank"] = False
-    payload = build_response(result)
-    payload["trace_id"] = trace_id
+    reporting_payload = build_response_with_reporting(
+        question=req.question,
+        tenant_id=req.tenant_id,
+        dataset_id="sales-fixture",
+        trace_id=trace_id,
+        permission_context={
+            "principal_id": req.user_id,
+            "role_scope": [f"region:{region}" for region in allowed_regions],
+            "row_level_policy_ref": f"sales-region:{req.user_id}",
+        },
+        plan=plan,
+        result=result,
+    )
+    payload = {
+        "answer": reporting_payload["answer"],
+        "chart": reporting_payload["chart"],
+        "report_preview": {
+            "intent": reporting_payload["report_intent"],
+            "dashboard": _normalize_dashboard_binding_kinds(reporting_payload["dashboard_spec"]),
+        },
+        "trace_id": trace_id,
+    }
 
     append_audit_event(
         {

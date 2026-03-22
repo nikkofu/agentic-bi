@@ -1,0 +1,627 @@
+from fastapi import APIRouter
+from fastapi import HTTPException
+from pydantic import BaseModel
+
+from app.domain.models import QueryPlan
+from app.domain.reporting_models import DashboardPage
+from app.domain.reporting_models import DashboardSection
+from app.domain.reporting_models import DashboardSpec
+from app.domain.reporting_models import DashboardWidget
+from app.domain.reporting_models import ReportIntent
+from app.domain.reporting_models import WidgetBinding
+from app.domain.reporting_models import WidgetPresentation
+from app.infra.repositories.dashboard_repo import DashboardRepository
+from app.infra.repositories.report_intent_repo import ReportIntentRepository
+from app.services.access_policy import resolve_allowed_regions
+from app.services.audit_log import append_audit_event, new_trace_id
+from app.services.conversation_memory import save_last_plan
+from app.services.dashboard_assembler import assemble_dashboard
+from app.services.query_executor import execute_query
+from app.services.query_plan_resolver import resolve_plan_for_question
+from app.services.query_validator import validate_plan
+from app.services.report_intent_builder import build_report_intent
+
+router = APIRouter(prefix="/v1")
+PRINCIPAL_MISMATCH = "PRINCIPAL_MISMATCH"
+UNSUPPORTED_SEMANTIC_FILTER = "UNSUPPORTED_SEMANTIC_FILTER"
+SUPPORTED_SEMANTIC_FILTER_FIELDS = {"region"}
+PERMISSION_DENIED = "PERMISSION_DENIED"
+
+
+class ReportingGenerateRequest(BaseModel):
+    tenant_id: str
+    user_id: str
+    principal_id: str | None = None
+    conversation_id: str
+    question: str
+
+
+class ReportingAssembleRequest(BaseModel):
+    tenant_id: str
+    user_id: str
+    principal_id: str | None = None
+    intent: ReportIntent
+
+
+class DashboardCreateRequest(BaseModel):
+    tenant_id: str
+    user_id: str
+    principal_id: str | None = None
+    report_intent: ReportIntent
+    dashboard: DashboardSpec
+
+
+def build_permission_context(*, principal_id: str, role_scope: list[str], row_level_policy_ref: str) -> dict:
+    return {
+        "principal_id": principal_id,
+        "role_scope": role_scope,
+        "row_level_policy_ref": row_level_policy_ref,
+    }
+
+
+def _canonical_principal(*, user_id: str, principal_id: str | None) -> str:
+    if principal_id is not None and principal_id != user_id:
+        raise ValueError(PRINCIPAL_MISMATCH)
+    return user_id
+
+
+def _resolve_identity_context(*, tenant_id: str, user_id: str, principal_id: str | None) -> tuple[str, list[str], dict]:
+    canonical_principal = _canonical_principal(user_id=user_id, principal_id=principal_id)
+    allowed_regions = resolve_allowed_regions(user_id, tenant_id)
+    permission_context = build_permission_context(
+        principal_id=canonical_principal,
+        role_scope=[f"region:{region}" for region in allowed_regions],
+        row_level_policy_ref=f"sales-region:{canonical_principal}",
+    )
+    return canonical_principal, allowed_regions, permission_context
+
+
+def _safe_permission_context(*, tenant_id: str, user_id: str) -> dict:
+    allowed_regions = resolve_allowed_regions(user_id, tenant_id)
+    return build_permission_context(
+        principal_id=user_id,
+        role_scope=[f"region:{region}" for region in allowed_regions],
+        row_level_policy_ref=f"sales-region:{user_id}",
+    )
+
+
+def _append_reporting_audit_event(
+    *,
+    trace_id: str,
+    status: str,
+    question: str,
+    conversation_id: str,
+    permission_context: dict,
+    error_code: str | None = None,
+    query_plan: dict | None = None,
+    response_type: str | None = None,
+    result_summary: dict | None = None,
+) -> None:
+    summary = dict(result_summary or {})
+    summary["permission_context"] = {
+        "principal_id": permission_context["principal_id"],
+        "role_scope": permission_context["role_scope"],
+        "row_level_policy_ref": permission_context["row_level_policy_ref"],
+    }
+    append_audit_event(
+        {
+            "trace_id": trace_id,
+            "status": status,
+            "question": question,
+            "conversation_id": conversation_id,
+            "query_plan": query_plan,
+            "response_type": response_type,
+            "error_code": error_code,
+            "result_summary": summary,
+        }
+    )
+
+
+def _matches_permission_context_payload(*, stored_permission_context: dict, permission_context: dict) -> bool:
+    return (
+        stored_permission_context.get("principal_id") == permission_context["principal_id"]
+        and sorted(stored_permission_context.get("role_scope", [])) == sorted(permission_context["role_scope"])
+        and stored_permission_context.get("row_level_policy_ref") == permission_context["row_level_policy_ref"]
+    )
+
+
+def _matches_permission_context(*, intent: ReportIntent, tenant_id: str, permission_context: dict) -> bool:
+    intent_permission_context = intent.permission_context.model_dump(mode="python")
+    return (
+        intent.tenant_id == tenant_id
+        and _matches_permission_context_payload(
+            stored_permission_context=intent_permission_context,
+            permission_context=permission_context,
+        )
+    )
+
+
+def _resolve_report_intent_for_save(
+    *,
+    repo: ReportIntentRepository,
+    intent: ReportIntent,
+    tenant_id: str,
+    permission_context: dict,
+) -> dict:
+    if not _matches_permission_context(
+        intent=intent,
+        tenant_id=tenant_id,
+        permission_context=permission_context,
+    ):
+        raise PermissionError(PERMISSION_DENIED)
+
+    try:
+        stored_intent = repo.get(intent.id)
+    except KeyError:
+        return repo.save(intent)
+
+    if (
+        stored_intent.get("tenant_id") != tenant_id
+        or stored_intent != intent.model_dump(mode="python")
+        or not _matches_permission_context_payload(
+            stored_permission_context=stored_intent.get("permission_context", {}),
+            permission_context=permission_context,
+        )
+    ):
+        raise PermissionError(PERMISSION_DENIED)
+
+    return stored_intent
+
+
+def execute_reporting_preview(req: ReportingGenerateRequest, *, allowed_regions: list[str]) -> tuple[QueryPlan, dict]:
+    plan = resolve_plan_for_question(
+        tenant_id=req.tenant_id,
+        user_id=req.user_id,
+        conversation_id=req.conversation_id,
+        question=req.question,
+    )
+    validate_plan(plan, allowed_regions=allowed_regions)
+    save_last_plan(req.tenant_id, req.user_id, req.conversation_id, plan)
+    result = execute_query(plan, scope={"allowed_regions": allowed_regions})
+    return plan, result
+
+
+def _build_query_plan_from_semantic_query(query) -> QueryPlan:
+    filters = {}
+    for query_filter in query.filters:
+        if not isinstance(query_filter, dict):
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+
+        field = query_filter.get("field")
+        op = query_filter.get("op")
+        value = query_filter.get("value")
+
+        if op != "=":
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+        if not isinstance(field, str) or field not in SUPPORTED_SEMANTIC_FILTER_FIELDS:
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+        if not isinstance(value, str):
+            raise ValueError(UNSUPPORTED_SEMANTIC_FILTER)
+
+        filters[field] = value
+
+    return QueryPlan(
+        metric=query.measures[0] if query.measures else "",
+        filters=filters,
+        time_window=query.time.get("window", "current"),
+        group_by=query.dimensions,
+        compare_to=query.comparison.get("mode", "") if query.comparison else "",
+        group_requested=bool(query.dimensions),
+    )
+
+
+def execute_semantic_queries_from_intent(intent: ReportIntent, *, allowed_regions: list[str]) -> list[dict]:
+    executed_queries: list[dict] = []
+    for query in intent.semantic_queries:
+        plan = _build_query_plan_from_semantic_query(query)
+        validate_plan(plan, allowed_regions=allowed_regions)
+        result = execute_query(plan, scope={"allowed_regions": allowed_regions})
+        executed_queries.append({"query_id": query.id, "query": query, "result": result})
+    return executed_queries
+
+
+def _chart_rows(result: dict) -> list[dict]:
+    series = result.get("series", [])
+    if series:
+        return [dict(row) for row in series]
+
+    breakdown = result.get("breakdown", [])
+    if breakdown:
+        return [dict(row) for row in breakdown]
+
+    return [dict(result)]
+
+
+def _build_multi_query_dashboard(*, intent: ReportIntent, executed_queries: list[dict]) -> DashboardSpec:
+    trace_id = intent.trace.get("trace_id", "unknown")
+    data_bindings = []
+    sections = []
+    for index, executed in enumerate(executed_queries, start=1):
+        query = executed["query"]
+        result = executed["result"]
+        source_ref = executed["query_id"]
+        metric = query.measures[0] if query.measures else ""
+
+        data_bindings.append(
+            {
+                "id": f"binding-{trace_id}-{source_ref}",
+                "source_ref": source_ref,
+                "kind": "materialized_result",
+                "value": result.get("value"),
+                "rows": _chart_rows(result),
+                "insight": "auto",
+            }
+        )
+        sections.append(
+            DashboardSection(
+                id=f"section-overview-{trace_id}-{source_ref}",
+                title=f"Query {index}",
+                layout={"columns": 12},
+                widgets=[
+                    DashboardWidget(
+                        id=f"widget-metric-{trace_id}-{source_ref}",
+                        kind="metric_card",
+                        title="核心指标",
+                        presentation=WidgetPresentation(family="kpi", variant="primary"),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="value"),
+                    ),
+                    DashboardWidget(
+                        id=f"widget-chart-{trace_id}-{source_ref}",
+                        kind="chart",
+                        title="趋势/分布",
+                        presentation=WidgetPresentation(
+                            family="table_like",
+                            variant="auto",
+                            config={"metric": metric},
+                        ),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="rows"),
+                    ),
+                    DashboardWidget(
+                        id=f"widget-insight-{trace_id}-{source_ref}",
+                        kind="insight",
+                        title="解读",
+                        presentation=WidgetPresentation(family="narrative", variant="auto"),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="insight"),
+                    ),
+                ],
+            )
+        )
+
+    return DashboardSpec(
+        id=f"dash-preview-{trace_id}",
+        version="1.0",
+        title=intent.question,
+        description="Auto-generated dashboard preview",
+        theme={"name": "paper"},
+        refresh_policy={"mode": "manual"},
+        variables=[],
+        data_bindings=data_bindings,
+        interactions=[],
+        pages=[
+            DashboardPage(
+                id=f"page-overview-{trace_id}",
+                title="Overview",
+                layout={"columns": 12},
+                sections=sections,
+            )
+        ],
+    )
+
+
+def _normalize_dashboard_binding_kinds(dashboard_payload: dict) -> dict:
+    bindings = dashboard_payload.get("data_bindings", [])
+    for binding in bindings:
+        if binding.get("kind") == "materialized":
+            binding["kind"] = "materialized_result"
+    return dashboard_payload
+
+
+@router.post("/report-intents:generate")
+def generate_report_intent(req: ReportingGenerateRequest):
+    trace_id = new_trace_id()
+    try:
+        _, allowed_regions, permission_context = _resolve_identity_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            principal_id=req.principal_id,
+        )
+        plan, result = execute_reporting_preview(req, allowed_regions=allowed_regions)
+    except ValueError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="REPORT_INTENT_GENERATE_FAILED",
+            question=req.question,
+            conversation_id=req.conversation_id,
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
+    except PermissionError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="REPORT_INTENT_GENERATE_FAILED",
+            question=req.question,
+            conversation_id=req.conversation_id,
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc
+
+    intent = build_report_intent(
+        question=req.question,
+        tenant_id=req.tenant_id,
+        dataset_id="sales-fixture",
+        trace_id=trace_id,
+        permission_context=permission_context,
+        plan=plan.model_dump(),
+        result=result,
+    )
+    ReportIntentRepository().save(intent)
+    _append_reporting_audit_event(
+        trace_id=trace_id,
+        status="REPORT_INTENT_GENERATED",
+        question=req.question,
+        conversation_id=req.conversation_id,
+        permission_context=permission_context,
+        query_plan=plan.model_dump(),
+        result_summary={"report_intent_id": intent.id},
+    )
+    return intent
+
+
+@router.get("/report-intents/{intent_id}")
+def get_report_intent(intent_id: str, tenant_id: str, user_id: str, principal_id: str | None = None):
+    trace_id = new_trace_id()
+    try:
+        canonical_principal, _, permission_context = _resolve_identity_context(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            principal_id=principal_id,
+        )
+    except ValueError as exc:
+        permission_context = _safe_permission_context(tenant_id=tenant_id, user_id=user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="REPORT_INTENT_FETCH_DENIED",
+            question=f"report-intent:{intent_id}",
+            conversation_id="",
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
+
+    try:
+        intent = ReportIntentRepository().get_for_owner(
+            intent_id=intent_id,
+            tenant_id=tenant_id,
+            principal_id=canonical_principal,
+        )
+    except KeyError as exc:
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="REPORT_INTENT_FETCH_DENIED",
+            question=f"report-intent:{intent_id}",
+            conversation_id="",
+            permission_context=permission_context,
+            error_code="PERMISSION_DENIED",
+        )
+        raise HTTPException(status_code=403, detail={"error_code": "PERMISSION_DENIED"}) from exc
+
+    _append_reporting_audit_event(
+        trace_id=trace_id,
+        status="REPORT_INTENT_FETCHED",
+        question=intent.get("question", f"report-intent:{intent_id}"),
+        conversation_id="",
+        permission_context=permission_context,
+        result_summary={"report_intent_id": intent_id},
+    )
+    return intent
+
+
+@router.post("/dashboards:assemble")
+def assemble_dashboard_preview(req: ReportingAssembleRequest):
+    trace_id = new_trace_id()
+    try:
+        _, allowed_regions, permission_context = _resolve_identity_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            principal_id=req.principal_id,
+        )
+        executed_queries = execute_semantic_queries_from_intent(
+            req.intent,
+            allowed_regions=allowed_regions,
+        )
+    except ValueError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_PREVIEW_ASSEMBLE_FAILED",
+            question=req.intent.question,
+            conversation_id=req.intent.trace.get("trace_id", ""),
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
+    except PermissionError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_PREVIEW_ASSEMBLE_FAILED",
+            question=req.intent.question,
+            conversation_id=req.intent.trace.get("trace_id", ""),
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc
+
+    if len(executed_queries) == 1:
+        dashboard = assemble_dashboard(intent=req.intent, result=executed_queries[0]["result"])
+    else:
+        dashboard = _build_multi_query_dashboard(intent=req.intent, executed_queries=executed_queries)
+    dashboard_payload = _normalize_dashboard_binding_kinds(dashboard.model_dump(mode="python"))
+    _append_reporting_audit_event(
+        trace_id=trace_id,
+        status="DASHBOARD_PREVIEW_ASSEMBLED",
+        question=req.intent.question,
+        conversation_id=req.intent.trace.get("trace_id", ""),
+        permission_context=permission_context,
+        query_plan={
+            "query_ids": [query["query_id"] for query in executed_queries],
+            "query_count": len(executed_queries),
+        },
+        response_type="dashboard_preview",
+        result_summary={
+            "dashboard_id": dashboard_payload.get("id"),
+            "query_count": len(executed_queries),
+        },
+    )
+    return {"dashboard": dashboard_payload}
+
+
+@router.post("/dashboards", status_code=201)
+def create_dashboard(req: DashboardCreateRequest):
+    trace_id = new_trace_id()
+    try:
+        canonical_principal, _, permission_context = _resolve_identity_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            principal_id=req.principal_id,
+        )
+    except ValueError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_SAVE_FAILED",
+            question=req.report_intent.question,
+            conversation_id=req.report_intent.trace.get("trace_id", ""),
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
+
+    report_intent_repo = ReportIntentRepository()
+    dashboard_repo = DashboardRepository()
+    try:
+        intent_payload = _resolve_report_intent_for_save(
+            repo=report_intent_repo,
+            intent=req.report_intent,
+            tenant_id=req.tenant_id,
+            permission_context=permission_context,
+        )
+    except PermissionError as exc:
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_SAVE_FAILED",
+            question=req.report_intent.question,
+            conversation_id=req.report_intent.trace.get("trace_id", ""),
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc
+
+    dashboard_payload = _normalize_dashboard_binding_kinds(req.dashboard.model_dump(mode="python"))
+    saved_dashboard = dashboard_repo.save(
+        tenant_id=req.tenant_id,
+        principal_id=canonical_principal,
+        report_intent_id=intent_payload["id"],
+        dashboard=dashboard_payload,
+    )
+    _append_reporting_audit_event(
+        trace_id=trace_id,
+        status="DASHBOARD_SAVED",
+        question=req.report_intent.question,
+        conversation_id=req.report_intent.trace.get("trace_id", ""),
+        permission_context=permission_context,
+        result_summary={
+            "dashboard_id": saved_dashboard["dashboard_id"],
+            "report_intent_id": saved_dashboard["report_intent_id"],
+        },
+    )
+    return {
+        "dashboard_id": saved_dashboard["dashboard_id"],
+        "report_intent_id": saved_dashboard["report_intent_id"],
+        "current_revision_id": saved_dashboard["current_revision_id"],
+        "published_revision_id": saved_dashboard["published_revision_id"],
+    }
+
+
+@router.get("/dashboards/{dashboard_id}")
+def get_dashboard(dashboard_id: str, tenant_id: str, user_id: str, principal_id: str | None = None):
+    trace_id = new_trace_id()
+    try:
+        canonical_principal, _, permission_context = _resolve_identity_context(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            principal_id=principal_id,
+        )
+    except ValueError as exc:
+        permission_context = _safe_permission_context(tenant_id=tenant_id, user_id=user_id)
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_FETCH_DENIED",
+            question=f"dashboard:{dashboard_id}",
+            conversation_id="",
+            permission_context=permission_context,
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
+
+    dashboard_repo = DashboardRepository()
+    report_intent_repo = ReportIntentRepository()
+    try:
+        stored = dashboard_repo.get_for_owner(
+            dashboard_id=dashboard_id,
+            tenant_id=tenant_id,
+            principal_id=canonical_principal,
+        )
+        intent = report_intent_repo.get_for_owner(
+            intent_id=stored["report_intent_id"],
+            tenant_id=tenant_id,
+            principal_id=canonical_principal,
+        )
+    except KeyError as exc:
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_FETCH_DENIED",
+            question=f"dashboard:{dashboard_id}",
+            conversation_id="",
+            permission_context=permission_context,
+            error_code=PERMISSION_DENIED,
+        )
+        raise HTTPException(status_code=403, detail={"error_code": "PERMISSION_DENIED"}) from exc
+
+    if not _matches_permission_context_payload(
+        stored_permission_context=intent.get("permission_context", {}),
+        permission_context=permission_context,
+    ):
+        _append_reporting_audit_event(
+            trace_id=trace_id,
+            status="DASHBOARD_FETCH_DENIED",
+            question=f"dashboard:{dashboard_id}",
+            conversation_id="",
+            permission_context=permission_context,
+            error_code=PERMISSION_DENIED,
+        )
+        raise HTTPException(status_code=403, detail={"error_code": PERMISSION_DENIED})
+
+    _append_reporting_audit_event(
+        trace_id=trace_id,
+        status="DASHBOARD_FETCHED",
+        question=intent.get("question", f"dashboard:{dashboard_id}"),
+        conversation_id="",
+        permission_context=permission_context,
+        result_summary={
+            "dashboard_id": stored["dashboard_id"],
+            "report_intent_id": stored["report_intent_id"],
+        },
+    )
+    return {
+        "dashboard_id": stored["dashboard_id"],
+        "report_intent_id": stored["report_intent_id"],
+        "current_revision_id": stored["current_revision_id"],
+        "published_revision_id": stored["published_revision_id"],
+        "dashboard": stored["dashboard"],
+        "report_intent": intent,
+    }
