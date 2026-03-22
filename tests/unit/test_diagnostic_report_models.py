@@ -8,28 +8,6 @@ from app.domain.insight_models import AttributionResult, InsightCard
 
 
 def test_diagnostic_report_accepts_nested_payloads():
-    summary = DiagnosticReportSummary(
-        title="毛利率异常诊断",
-        subtitle="华东区域",
-        headline="毛利率低于基线 6 个点",
-        metric="gross_margin_rate",
-        scope={"region": "华东"},
-        time_window="last_month",
-        severity="P1",
-    )
-    finding = DiagnosticFinding(
-        kind="metric_delta",
-        title="毛利率偏离基线",
-        statement="华东区域毛利率低于基线。",
-        evidence_refs=["ev-1"],
-    )
-    recommendation = DiagnosticRecommendation(
-        kind="followup_question",
-        label="成本驱动分析",
-        question="华东区域毛利率下降的主要驱动因素是什么？",
-        rationale="确定导致毛利率下降的原因。",
-    )
-
     report = DiagnosticReport(
         id="dr-1",
         version="1.0",
@@ -39,9 +17,30 @@ def test_diagnostic_report_accepts_nested_payloads():
         source_ref="ri-1",
         snapshot_time="2026-03-23T08:00:00Z",
         status="ready",
-        summary=summary,
-        findings=[finding],
-        recommendations=[recommendation],
+        summary={
+            "title": "毛利率异常诊断",
+            "subtitle": "华东区域",
+            "headline": "毛利率低于基线 6 个点",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+            "severity": "P1",
+        },
+        findings=[
+            {
+                "kind": "metric_delta",
+                "title": "毛利率偏离基线",
+                "statement": "华东区域毛利率低于基线。",
+            }
+        ],
+        recommendations=[
+            {
+                "kind": "followup_question",
+                "label": "成本驱动分析",
+                "question": "华东区域毛利率下降的主要驱动因素是什么？",
+                "rationale": "确定导致毛利率下降的原因。",
+            }
+        ],
         dashboard_id="dash-1",
         report_intent_id="ri-1",
         trace={"trace_id": "trace-1"},
@@ -49,6 +48,7 @@ def test_diagnostic_report_accepts_nested_payloads():
 
     assert report.summary.headline == "毛利率低于基线 6 个点"
     assert report.dashboard_id == "dash-1"
+    assert report.findings[0].evidence_refs == []
 
 
 def test_insight_card_accepts_report_fields():
