@@ -1,20 +1,37 @@
-import type { DashboardSpec } from "./types/reporting";
+import { Route, Routes } from "react-router-dom";
 import { DashboardPage } from "./components/DashboardPage";
+import { DashboardPageRoute } from "./routes/DashboardPageRoute";
+import { PreviewPage } from "./routes/PreviewPage";
+import type { DashboardSpec } from "./types/reporting";
+
+function ViewerScaffold() {
+  return (
+    <main className="dashboard-shell">
+      <header className="dashboard-header">
+        <p className="dashboard-eyebrow">Auto Reporting Preview</p>
+        <h1>Viewer Ready</h1>
+        <p className="dashboard-empty-state">
+          Open <code>/preview?question=...</code> to generate a dashboard preview, or <code>/dashboards/:dashboardId</code>
+          to view a saved dashboard revision.
+        </p>
+      </header>
+    </main>
+  );
+}
 
 export function App({ dashboard = null }: { dashboard?: DashboardSpec | null }) {
-  if (dashboard === null) {
-    return (
-      <main className="dashboard-shell">
-        <header className="dashboard-header">
-          <p className="dashboard-eyebrow">Auto Reporting Preview</p>
-          <h1>Viewer Scaffold Ready</h1>
-          <p className="dashboard-empty-state">
-            Dashboard data wiring lands in Task 7. This shell is ready to render a preview or saved dashboard.
-          </p>
-        </header>
-      </main>
-    );
+  if (dashboard !== null) {
+    return <DashboardPage dashboard={dashboard} />;
   }
 
-  return <DashboardPage dashboard={dashboard} />;
+  return (
+    <Routes>
+      <Route path="/" element={<ViewerScaffold />} />
+      <Route path="/preview" element={<PreviewPage />} />
+      <Route path="/dashboards/:dashboardId" element={<DashboardPageRoute />} />
+      <Route path="*" element={<ViewerScaffold />} />
+    </Routes>
+  );
 }
+
+export default App;

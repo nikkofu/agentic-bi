@@ -65,6 +65,49 @@ export interface DashboardSpec {
   pages: DashboardPageSpec[];
 }
 
+export interface PermissionContext {
+  principal_id: string;
+  role_scope: string[];
+  row_level_policy_ref?: string | null;
+}
+
+export interface SemanticQuery {
+  id: string;
+  kind: string;
+  measures: string[];
+  dimensions: string[];
+  filters: Record<string, JsonValue>[];
+  time: Record<string, JsonValue>;
+  comparison?: Record<string, JsonValue> | null;
+  sort?: Record<string, JsonValue> | null;
+  limit?: number | null;
+  display_hint: Record<string, JsonValue>;
+}
+
+export interface ReportIntent {
+  id: string;
+  version: string;
+  tenant_id: string;
+  dataset_id: string;
+  source: string;
+  question: string;
+  goal: string;
+  permission_context: PermissionContext;
+  semantic_queries: SemanticQuery[];
+  explanations: Record<string, JsonValue>[];
+  constraints: Record<string, JsonValue>;
+  trace: Record<string, JsonValue>;
+}
+
 export interface ReportPreviewPayload {
   dashboard: DashboardSpec;
+}
+
+export interface DashboardDocument {
+  dashboard_id: string;
+  report_intent_id: string;
+  current_revision_id: string;
+  published_revision_id: string;
+  dashboard: DashboardSpec;
+  report_intent: ReportIntent;
 }
