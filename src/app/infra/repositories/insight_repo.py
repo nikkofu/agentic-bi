@@ -34,7 +34,7 @@ class InsightRepository:
         card_id = card.get("card_id") or self._fallback_card_id(card)
         report_id = card.get("report_id")
         dashboard_id = card.get("dashboard_id")
-        detail_url = card.get("detail_url") or self._build_detail_url(report_id=report_id, dashboard_id=dashboard_id)
+        detail_url = self._build_detail_url(report_id=report_id)
 
         with self.engine.begin() as connection:
             connection.execute(
@@ -118,7 +118,7 @@ class InsightRepository:
         }
 
     def attach_report(self, card_id: str, report_id: str, dashboard_id: str) -> None:
-        detail_url = self._build_detail_url(report_id=report_id, dashboard_id=dashboard_id)
+        detail_url = self._build_detail_url(report_id=report_id)
         with self.engine.begin() as connection:
             updated = connection.execute(
                 update(insight_cards)
@@ -147,9 +147,7 @@ class InsightRepository:
         return f"card-{fingerprint[:12]}"
 
     @staticmethod
-    def _build_detail_url(*, report_id: str | None, dashboard_id: str | None) -> str | None:
-        if dashboard_id:
-            return f"/v1/dashboards/{dashboard_id}"
+    def _build_detail_url(*, report_id: str | None) -> str | None:
         if report_id:
-            return f"/v1/reports/{report_id}"
+            return f"/reports/{report_id}"
         return None

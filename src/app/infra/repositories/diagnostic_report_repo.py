@@ -6,10 +6,8 @@ from sqlalchemy import MetaData
 from sqlalchemy import String
 from sqlalchemy import Table
 from sqlalchemy import Text
-from sqlalchemy import UniqueConstraint
 from sqlalchemy import insert
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from app.infra.db import get_engine
 
@@ -28,13 +26,6 @@ diagnostic_reports = Table(
     Column("dashboard_id", String, nullable=False),
     Column("report_intent_id", String, nullable=False),
     Column("payload", Text, nullable=False),
-    UniqueConstraint(
-        "tenant_id",
-        "principal_id",
-        "source_kind",
-        "source_ref",
-        name="uq_diagnostic_reports_source_owner",
-    ),
 )
 
 
@@ -77,7 +68,9 @@ class DiagnosticReportRepository:
 
         return json.loads(row[0])
 
-    def get_by_source_ref(self, tenant_id: str, principal_id: str, source_kind: str, source_ref: str) -> dict:
+    def get_by_source_ref(
+        self, tenant_id: str, principal_id: str, source_kind: str, source_ref: str
+    ) -> dict | None:
         with self.engine.begin() as connection:
             row = connection.execute(
                 select(diagnostic_reports.c.payload).where(
@@ -85,11 +78,11 @@ class DiagnosticReportRepository:
                     diagnostic_reports.c.principal_id == principal_id,
                     diagnostic_reports.c.source_kind == source_kind,
                     diagnostic_reports.c.source_ref == source_ref,
-                )
+                ).order_by(diagnostic_reports.c.snapshot_time.desc())
             ).fetchone()
 
         if row is None:
-            raise KeyError(source_ref)
+            return None
 
         return json.loads(row[0])
 
@@ -101,15 +94,14 @@ class DiagnosticReportRepository:
         create_fn: Callable[[], dict],
     ) -> dict:
         source_kind = "insight_card"
-        try:
-            return self.get_by_source_ref(
-                tenant_id=tenant_id,
-                principal_id=principal_id,
-                source_kind=source_kind,
-                source_ref=source_ref,
-            )
-        except KeyError:
-            pass
+        existing = self.get_by_source_ref(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+        )
+        if existing is not None:
+            return existing
 
         payload = create_fn()
         payload = payload.model_dump(mode="python") if hasattr(payload, "model_dump") else dict(payload)
@@ -118,12 +110,4 @@ class DiagnosticReportRepository:
         payload["source_kind"] = source_kind
         payload["source_ref"] = source_ref
 
-        try:
-            return self.save(payload)
-        except IntegrityError:
-            return self.get_by_source_ref(
-                tenant_id=tenant_id,
-                principal_id=principal_id,
-                source_kind=source_kind,
-                source_ref=source_ref,
-            )
+        return self.save(payload)

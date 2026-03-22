@@ -79,6 +79,15 @@ def test_report_repo_persists_metadata_for_owner(tmp_path, monkeypatch):
         source_ref="card-1",
     )
     assert by_source["id"] == "dr-1"
+    assert (
+        reports.get_by_source_ref(
+            tenant_id="t-1",
+            principal_id="u-1",
+            source_kind="insight_card",
+            source_ref="card-missing",
+        )
+        is None
+    )
 
     with pytest.raises(KeyError):
         reports.get_for_owner(report_id="dr-1", tenant_id="t-1", principal_id="u-2")
@@ -116,6 +125,28 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
     assert total_rows == 1
 
 
+def test_report_repo_allows_multiple_on_demand_snapshots_for_same_source_ref(tmp_path, monkeypatch):
+    db_path = tmp_path / "report-on-demand.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    reports = DiagnosticReportRepository()
+
+    first = build_report_payload(report_id="dr-od-1", dashboard_id="dash-1")
+    first["source_kind"] = "on_demand"
+    first["source_ref"] = "direct:u-1:last_month"
+    first["snapshot_time"] = "2026-03-22T10:00:00Z"
+    second = build_report_payload(report_id="dr-od-2", dashboard_id="dash-2")
+    second["source_kind"] = "on_demand"
+    second["source_ref"] = "direct:u-1:last_month"
+    second["snapshot_time"] = "2026-03-22T11:00:00Z"
+
+    reports.save(first)
+    reports.save(second)
+
+    with sqlite3.connect(db_path) as connection:
+        total_rows = connection.execute("SELECT COUNT(*) FROM diagnostic_reports").fetchone()[0]
+    assert total_rows == 2
+
+
 def test_insight_repo_attach_report_and_get_by_card_id(tmp_path, monkeypatch):
     db_path = tmp_path / "insight-linkage.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -143,7 +174,7 @@ def test_insight_repo_attach_report_and_get_by_card_id(tmp_path, monkeypatch):
 
     assert stored["report_id"] == "dr-9"
     assert stored["dashboard_id"] == "dash-9"
-    assert stored["detail_url"] == "/v1/dashboards/dash-9"
+    assert stored["detail_url"] == "/reports/dr-9"
 
     with pytest.raises(KeyError):
         repo.get(card_id=saved["card_id"], allowed_regions=["华南"])
