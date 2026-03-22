@@ -14,7 +14,7 @@ def test_diagnostic_report_accepts_nested_payloads():
         headline="毛利率低于基线 6 个点",
         metric="gross_margin_rate",
         scope={"region": "华东"},
-        time_window={"grain": "month", "start": "2026-02-01", "end": "2026-02-28"},
+        time_window="last_month",
         severity="P1",
     )
     finding = DiagnosticFinding(

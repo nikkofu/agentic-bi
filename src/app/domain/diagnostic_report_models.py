@@ -8,7 +8,7 @@ class DiagnosticReportSummary(StrictModel):
     subtitle: str | None = None
     metric: str
     scope: dict[str, str] = Field(default_factory=dict)
-    time_window: dict = Field(default_factory=dict)
+    time_window: str
     severity: str
     headline: str
 
@@ -39,6 +39,6 @@ class DiagnosticReport(StrictModel):
     summary: DiagnosticReportSummary
     findings: list[DiagnosticFinding] = Field(default_factory=list)
     recommendations: list[DiagnosticRecommendation] = Field(default_factory=list)
-    dashboard_id: str | None = None
+    dashboard_id: str
     report_intent_id: str
     trace: dict = Field(default_factory=dict)
