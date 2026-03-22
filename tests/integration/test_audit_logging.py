@@ -3,6 +3,7 @@ from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
+from app.api import reports as reports_api
 from app.infra.repositories.dashboard_repo import DashboardRepository
 from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
@@ -532,3 +533,29 @@ def test_diagnostic_report_endpoints_persist_audit_records(tmp_path, monkeypatch
     statuses = {event["status"] for event in _AUDIT_EVENTS}
     assert "DIAGNOSTIC_REPORT_GENERATED" in statuses
     assert "DIAGNOSTIC_REPORT_FETCH_DENIED" in statuses
+
+
+def test_diagnostic_report_generate_reuses_request_trace_for_uncached_success(tmp_path, monkeypatch):
+    db_path = tmp_path / "diagnostic-report-trace-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+    trace_ids = iter(["trace-request", "trace-snapshot"])
+    monkeypatch.setattr(reports_api, "new_trace_id", lambda: next(trace_ids))
+
+    generated = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+        },
+    )
+
+    assert generated.status_code == 200
+    assert generated.json()["report"]["trace"]["trace_id"] == "trace-request"
+    generated_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATED")
+    assert generated_event["trace_id"] == "trace-request"

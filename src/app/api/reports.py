@@ -17,6 +17,7 @@ from app.services.diagnostic_dashboard_assembler import assemble_diagnostic_dash
 from app.services.diagnostic_report_builder import build_diagnostic_report
 from app.services.insight_attribution import compute_single_layer_attribution
 from app.services.query_executor import execute_query
+from app.services.query_validator import validate_plan
 from app.services.report_intent_builder import build_report_intent
 
 router = APIRouter(prefix="/v1")
@@ -86,6 +87,7 @@ def _ensure_default_report_bundle_for_insight_card(
     tenant_id: str,
     principal_id: str,
     card: dict,
+    trace_id: str | None = None,
 ) -> tuple[dict, bool]:
     report_repo = DiagnosticReportRepository()
     report_id = card.get("report_id")
@@ -123,6 +125,7 @@ def _ensure_default_report_bundle_for_insight_card(
         principal_id=principal_id,
         source_ref=card["card_id"],
         create_fn=lambda: _persist_snapshot(
+            trace_id=trace_id,
             tenant_id=tenant_id,
             principal_id=principal_id,
             question=card["suggested_next_question"],
@@ -161,6 +164,7 @@ def _ensure_default_report_bundle_for_insight_card(
 
 def _persist_snapshot(
     *,
+    trace_id: str | None = None,
     tenant_id: str,
     principal_id: str,
     question: str,
@@ -172,8 +176,17 @@ def _persist_snapshot(
     findings: list[dict] | None = None,
     recommendations: list[dict] | None = None,
 ) -> dict:
-    trace_id = new_trace_id()
+    snapshot_trace_id = trace_id or new_trace_id()
     allowed_regions = resolve_allowed_regions(user_id=principal_id, tenant_id=tenant_id)
+    query_plan = QueryPlan(
+        metric=metric,
+        filters=scope,
+        time_window=time_window,
+        group_by=["month"],
+        compare_to="",
+        group_requested=True,
+    )
+    validate_plan(query_plan, allowed_regions=allowed_regions)
     permission_context = build_permission_context(
         principal_id=principal_id,
         role_scope=[f"region:{region}" for region in allowed_regions],
@@ -183,9 +196,9 @@ def _persist_snapshot(
         question=question,
         tenant_id=tenant_id,
         dataset_id="sales-fixture",
-        trace_id=trace_id,
+        trace_id=snapshot_trace_id,
         permission_context=permission_context,
-        plan={"metric": metric, "filters": scope, "time_window": time_window, "group_by": ["month"]},
+        plan=query_plan.model_dump(mode="python"),
         result={"metric": metric, "time_window": time_window},
     )
     ReportIntentRepository().save(intent)
@@ -202,14 +215,7 @@ def _persist_snapshot(
         dashboard_id=dashboard_id,
     )
     overview_result = execute_query(
-        QueryPlan(
-            metric=metric,
-            filters=scope,
-            time_window=time_window,
-            group_by=["month"],
-            compare_to="",
-            group_requested=True,
-        ),
+        query_plan,
         scope={"allowed_regions": allowed_regions},
     )
     driver_attribution = compute_single_layer_attribution(
@@ -237,7 +243,7 @@ def _persist_snapshot(
     )
     saved_report = DiagnosticReportRepository().save(report=report.model_dump(mode="python"))
     _append_report_audit_event(
-        trace_id=trace_id,
+        trace_id=snapshot_trace_id,
         status="DIAGNOSTIC_REPORT_GENERATED",
         permission_context=permission_context,
         question=question,
@@ -317,6 +323,7 @@ def generate_report(req: ReportGenerateRequest):
                 tenant_id=req.tenant_id,
                 principal_id=canonical_principal,
                 card=card,
+                trace_id=trace_id,
             )
             if reused_existing:
                 _append_report_audit_event(
@@ -338,6 +345,7 @@ def generate_report(req: ReportGenerateRequest):
             source_ref = f"direct:{req.user_id}:{req.metric}:{req.time_window}"
             question = f"请生成{req.scope}{req.metric}诊断报告"
             return _persist_snapshot(
+                trace_id=trace_id,
                 tenant_id=req.tenant_id,
                 principal_id=canonical_principal,
                 question=question,
@@ -369,3 +377,13 @@ def generate_report(req: ReportGenerateRequest):
             error_code=PERMISSION_DENIED,
         )
         raise HTTPException(status_code=403, detail={"error_code": PERMISSION_DENIED}) from exc
+    except PermissionError as exc:
+        permission_context = _safe_permission_context(tenant_id=req.tenant_id, user_id=req.user_id)
+        _append_report_audit_event(
+            trace_id=trace_id,
+            status="DIAGNOSTIC_REPORT_GENERATE_FAILED",
+            permission_context=permission_context,
+            question="diagnostic-report:generate",
+            error_code=str(exc),
+        )
+        raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc

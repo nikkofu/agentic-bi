@@ -10,6 +10,8 @@ router = APIRouter(prefix="/v1/insights")
 @router.get("/cards")
 def list_insight_cards(user_id: str, tenant_id: str):
     allowed_regions = resolve_allowed_regions(user_id=user_id, tenant_id=tenant_id)
+    if not allowed_regions:
+        return {"items": []}
     items = InsightRepository().list_by_regions(allowed_regions)
     hydrated_items = []
     for item in items:
@@ -32,6 +34,8 @@ def list_insight_cards(user_id: str, tenant_id: str):
 @router.get("/cards/{card_id}")
 def get_insight_card(card_id: str, user_id: str, tenant_id: str):
     allowed_regions = resolve_allowed_regions(user_id=user_id, tenant_id=tenant_id)
+    if not allowed_regions:
+        raise HTTPException(status_code=404, detail={"error_code": "NOT_FOUND"})
     try:
         card = InsightRepository().get(card_id, allowed_regions)
     except KeyError as exc:

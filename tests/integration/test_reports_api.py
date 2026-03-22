@@ -97,6 +97,33 @@ def seed_insight_without_report(card_id: str = "card-new") -> dict:
     return card
 
 
+def seed_insight_with_foreign_report(card_id: str = "card-foreign", region: str = "华南") -> tuple[str, str]:
+    dashboard_repo = DashboardRepository()
+    report_repo = DiagnosticReportRepository()
+    insight_repo = InsightRepository()
+    dashboard = dashboard_repo.save(
+        tenant_id="t-1",
+        principal_id="u-1",
+        report_intent_id="ri-foreign",
+        dashboard=build_dashboard_payload("dash-foreign"),
+        dashboard_id="dash-foreign",
+    )
+    report = report_repo.save(
+        report=build_report_payload(
+            report_id="dr-foreign",
+            dashboard_id=dashboard["dashboard_id"],
+            source_ref=card_id,
+        )
+    )
+    card = build_insight_card_payload()
+    card["card_id"] = card_id
+    card["trace_id"] = f"trace-{card_id}"
+    card["scope"] = {"region": region}
+    insight_repo.save_card(card)
+    insight_repo.attach_report(card_id=card_id, report_id=report["id"], dashboard_id=dashboard["dashboard_id"])
+    return card_id, report["id"]
+
+
 def test_get_report_returns_report_metadata_and_embedded_dashboard(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -238,6 +265,27 @@ def test_post_reports_generate_requires_direct_params_error_code(tmp_path, monke
     assert resp.json()["detail"]["error_code"] == "MISSING_DIRECT_REPORT_PARAMS"
 
 
+def test_post_reports_generate_direct_denies_unknown_user_scope(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-unknown-scope.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
+    resp = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-unknown",
+            "principal_id": "u-unknown",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+        },
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error_code"] == "PERMISSION_DENIED"
+
+
 def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-card-detail.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -248,6 +296,34 @@ def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["card"]["report_id"] == report_id
     assert resp.json()["report_summary"]["report_id"] == report_id
+
+
+def test_insight_reads_fall_back_to_principal_owned_report_when_linked_report_is_inaccessible(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-inaccessible-linked-report.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    card_id, foreign_report_id = seed_insight_with_foreign_report()
+
+    list_resp = client.get("/v1/insights/cards", params={"tenant_id": "t-1", "user_id": "u-south"})
+    assert list_resp.status_code == 200
+    item = next(item for item in list_resp.json()["items"] if item["card_id"] == card_id)
+    assert item["report_id"] != foreign_report_id
+    assert item["detail_url"] == f"/reports/{item['report_id']}"
+
+    detail_resp = client.get(f"/v1/insights/cards/{card_id}", params={"tenant_id": "t-1", "user_id": "u-south"})
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["report_summary"]["report_id"] == item["report_id"]
+
+    accessible_report = client.get(
+        f"/v1/reports/{item['report_id']}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert accessible_report.status_code == 200
+
+    denied_foreign_report = client.get(
+        f"/v1/reports/{foreign_report_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert denied_foreign_report.status_code == 403
 
 
 def test_report_endpoints_persist_success_and_failure_audit_records(tmp_path, monkeypatch):
