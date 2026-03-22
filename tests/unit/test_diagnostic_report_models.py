@@ -9,28 +9,42 @@ from app.domain.insight_models import AttributionResult, InsightCard
 
 def test_diagnostic_report_accepts_nested_payloads():
     summary = DiagnosticReportSummary(
+        title="毛利率异常诊断",
+        subtitle="华东区域",
         headline="毛利率低于基线 6 个点",
         metric="gross_margin_rate",
         scope={"region": "华东"},
+        time_window={"grain": "month", "start": "2026-02-01", "end": "2026-02-28"},
+        severity="P1",
     )
     finding = DiagnosticFinding(
-        metric="gross_margin_rate",
-        scope={"region": "华东"},
-        description="华东区域毛利率低于基线。",
+        kind="metric_delta",
+        title="毛利率偏离基线",
+        statement="华东区域毛利率低于基线。",
+        evidence_refs=["ev-1"],
     )
     recommendation = DiagnosticRecommendation(
-        action="检查华东区域的主要成本驱动因素。",
+        kind="followup_question",
+        label="成本驱动分析",
+        question="华东区域毛利率下降的主要驱动因素是什么？",
         rationale="确定导致毛利率下降的原因。",
     )
 
     report = DiagnosticReport(
         id="dr-1",
-        report_intent_id="ri-1",
-        trace_id="trace-1",
-        dashboard_id="dash-1",
+        version="1.0",
+        tenant_id="t-1",
+        principal_id="u-1",
+        source_kind="report_intent",
+        source_ref="ri-1",
+        snapshot_time="2026-03-23T08:00:00Z",
+        status="ready",
         summary=summary,
         findings=[finding],
         recommendations=[recommendation],
+        dashboard_id="dash-1",
+        report_intent_id="ri-1",
+        trace={"trace_id": "trace-1"},
     )
 
     assert report.summary.headline == "毛利率低于基线 6 个点"
@@ -57,3 +71,6 @@ def test_insight_card_accepts_report_fields():
 
     assert card.card_id == "card-1"
     assert card.scope == {"region": "华东"}
+    assert card.report_id == "dr-1"
+    assert card.dashboard_id == "dash-1"
+    assert card.detail_url == "/reports/dr-1"
