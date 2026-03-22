@@ -29,6 +29,10 @@ def _severity_from_findings(findings: list[dict]) -> str:
     return "medium"
 
 
+def _sanitize_finding_inputs(findings: list[dict]) -> list[dict]:
+    return [{key: value for key, value in item.items() if key != "severity"} for item in findings]
+
+
 def _build_headline(metric_result: dict) -> str:
     metric = metric_result.get("metric", "metric")
     if "value" in metric_result:
@@ -50,6 +54,7 @@ def build_diagnostic_report(
     recommendations: list[dict],
     dashboard_id: str,
 ) -> DiagnosticReport:
+    sanitized_findings = _sanitize_finding_inputs(finding_inputs)
     return DiagnosticReport(
         id=f"dr-{uuid4().hex[:12]}",
         version="1.0",
@@ -68,7 +73,7 @@ def build_diagnostic_report(
             severity=_severity_from_findings(finding_inputs),
             headline=_build_headline(metric_result),
         ),
-        findings=[DiagnosticFinding(**item) for item in finding_inputs],
+        findings=[DiagnosticFinding(**item) for item in sanitized_findings],
         recommendations=[DiagnosticRecommendation(**item) for item in recommendations],
         dashboard_id=dashboard_id,
         report_intent_id=report_intent.id,

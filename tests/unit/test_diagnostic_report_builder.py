@@ -54,3 +54,30 @@ def test_build_diagnostic_report_from_direct_context_creates_direct_summary():
     )
     assert report.source_kind == "on_demand"
     assert report.summary.metric == "gross_margin_rate"
+
+
+def test_build_diagnostic_report_preserves_finding_severity_metadata():
+    intent = report_intent_fixture()
+    severity_value = "critical"
+    finding_inputs = [
+        {
+            "kind": "trend",
+            "title": "趋势下滑",
+            "statement": "最近一个月持续走低",
+            "evidence_refs": ["sq-trend-1"],
+            "severity": severity_value,
+        }
+    ]
+    report = build_diagnostic_report(
+        tenant_id="t-1",
+        principal_id="u-1",
+        source_kind="insight_card",
+        source_ref="card-5",
+        report_intent=intent,
+        metric_result={"metric": "gross_margin_rate", "value": 0.20, "time_window": "last_month"},
+        finding_inputs=finding_inputs,
+        recommendations=[],
+        dashboard_id="dash-5",
+    )
+    assert report.summary.severity == severity_value
+    assert report.findings[0].statement == "最近一个月持续走低"
