@@ -2,7 +2,7 @@
 
 Agentic BI is a decision-intelligence product prototype that upgrades traditional ChatBI from passive query/visualization into an active, governable business copilot.
 
-Current focus is **Phase 1 (Sales Copilot)**: high-accuracy, traceable, RBAC-safe natural-language metric Q&A in the sales domain.
+Current focus is **Phase 1 (Sales Copilot)** plus the first **Auto Reporting Phase 1** slice: high-accuracy, traceable, RBAC-safe natural-language metric Q&A in the sales domain, with a read-only report protocol and viewer on top.
 
 ## Why this project
 
@@ -19,6 +19,13 @@ Phase 2/3 (from RFP) extend toward proactive diagnosis and execution workflows.
 - Follow-up question continuity in conversation
 - RBAC-aware query validation
 - Full audit trail per request
+- Auto-reporting protocol documents built from the same governed query pipeline
+- Read-only dashboard preview/save/load flows
+- Separate viewer app for previewing and loading saved dashboards
+
+## Auto Reporting Phase 1 scope note
+
+This phase delivers a **read-only viewer**, not a full dashboard editor. It intentionally does **not** include drag-and-drop layout editing, editor-state APIs, arbitrary dataset onboarding, or raw model chain-of-thought exposure.
 
 ## Current implementation
 
@@ -34,8 +41,13 @@ Phase 2/3 (from RFP) extend toward proactive diagnosis and execution workflows.
 - Audit event logging with trace IDs and SQLite persistence
 - Recovery guidance for missing metrics, unknown metrics, and invalid multi-dimension grouping requests, including targeted repair suggestions for near-miss metric terms and invalid dimension combinations
 - Proactive insight pipeline primitives: rule-based anomaly detection, single-layer attribution, insight card generation, monitor orchestration, and RBAC-scoped insight listing API
+- Reporting protocol layer with `ReportIntent`, `DashboardSpec`, and `EditorState` models
+- Reporting endpoints for generating report intents, assembling dashboard previews, persisting dashboards, and fetching saved dashboards
+- SQLite-backed dashboard persistence with revision tracking, audit logging, and permission-context checks to prevent access widening or drift leakage
+- Read-only Vite + React viewer with routes for live preview and saved-dashboard rendering
+- Frontend widget rendering for `metric_card`, `chart`, `insight`, and `text` widgets through an ECharts adapter
 
-## Run
+## Backend run
 
 ```bash
 python -m venv .venv
@@ -44,17 +56,51 @@ pip install fastapi pydantic pytest "httpx<0.28" sqlalchemy uvicorn
 uvicorn app.main:app --reload --app-dir src
 ```
 
-## Test
+The backend now exposes these reporting endpoints in addition to the existing chat and insight APIs:
+
+- `POST /v1/report-intents:generate`
+- `GET /v1/report-intents/{intent_id}`
+- `POST /v1/dashboards:assemble`
+- `POST /v1/dashboards`
+- `GET /v1/dashboards/{dashboard_id}`
+
+For local viewer development, CORS defaults allow:
+
+- `http://127.0.0.1:5173`
+- `http://localhost:5173`
+- `http://127.0.0.1:4173`
+- `http://localhost:4173`
+
+Override with `AGENTIC_BI_DEV_VIEWER_ORIGINS=origin1,origin2` if needed.
+
+## Viewer run
 
 ```bash
-pytest tests -v
+cd web
+npm install
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Viewer routes:
+
+- `/preview?question=上个月华东区毛利率是多少？`
+- `/dashboards/:dashboardId`
+
+## Test & build
+
+```bash
+.venv/bin/pytest -q
+cd web && npm run test -- --run
+cd web && npm run build
 ```
 
 ## Canonical documents
 
 - RFP: `docs/RFP.md`
-- Approved design spec: `docs/superpowers/specs/2026-03-20-phase1-sales-copilot-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-03-20-phase1-sales-copilot.md`
+- Base sales-copilot design: `docs/superpowers/specs/2026-03-20-phase1-sales-copilot-design.md`
+- Auto-reporting design: `docs/superpowers/specs/2026-03-21-agentic-bi-auto-reporting-protocol-design.md`
+- Base sales-copilot implementation plan: `docs/superpowers/plans/2026-03-20-phase1-sales-copilot.md`
+- Auto-reporting implementation plan: `docs/superpowers/plans/2026-03-21-auto-reporting-phase1.md`
 - Extra MVP scenario spec: `docs/superpowers/specs/2026-03-20-agentic-bi-sales-pricing-design.md`
 - Project status: `docs/PROJECT-STATUS.md`
 
