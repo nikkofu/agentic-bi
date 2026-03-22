@@ -202,7 +202,7 @@ def _persist_snapshot(
         result={"metric": metric, "time_window": time_window},
     )
     ReportIntentRepository().save(intent)
-    dashboard_id = f"dash-{trace_id}"
+    dashboard_id = f"dash-{snapshot_trace_id}"
     report = build_diagnostic_report(
         tenant_id=tenant_id,
         principal_id=principal_id,
