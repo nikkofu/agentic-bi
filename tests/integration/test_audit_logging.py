@@ -211,6 +211,14 @@ def _seed_insight_with_default_report() -> tuple[str, str]:
     return "card-1", report["id"]
 
 
+def _seed_insight_without_report(card_id: str = "card-audit-new") -> dict:
+    card = _build_insight_card_payload()
+    card["card_id"] = card_id
+    card["trace_id"] = f"trace-{card_id}"
+    InsightRepository().save_card(card)
+    return card
+
+
 def test_chat_query_persists_audit_record(tmp_path, monkeypatch):
     db_path = tmp_path / "audit.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -559,3 +567,44 @@ def test_diagnostic_report_generate_reuses_request_trace_for_uncached_success(tm
     assert generated.json()["report"]["trace"]["trace_id"] == "trace-request"
     generated_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATED")
     assert generated_event["trace_id"] == "trace-request"
+
+
+def test_insight_endpoints_audit_lazy_report_generation_failures(tmp_path, monkeypatch):
+    db_path = tmp_path / "diagnostic-report-lazy-failure-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+    seeded_card = _seed_insight_without_report("card-audit-lazy-fail")
+
+    def raise_report_save_failure(self, report, connection=None):
+        raise RuntimeError("report-save-failed")
+
+    monkeypatch.setattr(DiagnosticReportRepository, "save", raise_report_save_failure)
+
+    list_resp = client.get("/v1/insights/cards", params={"tenant_id": "t-1", "user_id": "u-1"})
+    assert list_resp.status_code == 200
+
+    detail_resp = client.get(
+        f"/v1/insights/cards/{seeded_card['card_id']}",
+        params={"tenant_id": "t-1", "user_id": "u-1"},
+    )
+    assert detail_resp.status_code == 200
+
+    failed_events = [event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED"]
+    assert len(failed_events) == 2
+    assert all(
+        event["error_code"] == reports_api.DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED for event in failed_events
+    )
+    assert all(event["result_summary"]["card_id"] == seeded_card["card_id"] for event in failed_events)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT status, error_code, result_summary
+            FROM audit_events
+            WHERE status = 'DIAGNOSTIC_REPORT_GENERATE_FAILED'
+            """
+        ).fetchall()
+
+    assert len(rows) == 2
+    assert all(row[1] == reports_api.DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED for row in rows)
+    assert all(seeded_card["card_id"] in (row[2] or "") for row in rows)

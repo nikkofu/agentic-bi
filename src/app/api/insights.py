@@ -2,11 +2,52 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException
 
+from app.api.reporting import build_permission_context
+from app.api.reports import DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
 from app.api.reports import _ensure_default_report_bundle_for_insight_card
 from app.infra.repositories.insight_repo import InsightRepository
 from app.services.access_policy import resolve_allowed_regions
+from app.services.audit_log import append_audit_event
+from app.services.audit_log import new_trace_id
 
 router = APIRouter(prefix="/v1/insights")
+
+
+def _safe_permission_context(*, tenant_id: str, user_id: str) -> dict:
+    allowed_regions = resolve_allowed_regions(user_id=user_id, tenant_id=tenant_id)
+    return build_permission_context(
+        principal_id=user_id,
+        role_scope=[f"region:{region}" for region in allowed_regions],
+        row_level_policy_ref=f"sales-region:{user_id}",
+    )
+
+
+def _lazy_report_failure_error_code(exc: Exception) -> str:
+    if isinstance(exc, (ValueError, PermissionError)):
+        return str(exc)
+    return DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
+
+
+def _append_lazy_report_failure_audit_event(*, tenant_id: str, user_id: str, card: dict, exc: Exception) -> None:
+    permission_context = _safe_permission_context(tenant_id=tenant_id, user_id=user_id)
+    append_audit_event(
+        {
+            "trace_id": new_trace_id(),
+            "status": "DIAGNOSTIC_REPORT_GENERATE_FAILED",
+            "question": card.get("suggested_next_question", f"insight-card:{card.get('card_id', 'unknown')}"),
+            "conversation_id": "",
+            "error_code": _lazy_report_failure_error_code(exc),
+            "result_summary": {
+                "card_id": card.get("card_id"),
+                "entry_mode": "insight_card_lazy",
+                "permission_context": {
+                    "principal_id": permission_context["principal_id"],
+                    "role_scope": permission_context["role_scope"],
+                    "row_level_policy_ref": permission_context["row_level_policy_ref"],
+                },
+            },
+        }
+    )
 
 
 def _build_contextual_detail_url(*, report_id: str, tenant_id: str, user_id: str) -> str:
@@ -34,7 +75,13 @@ def list_insight_cards(user_id: str, tenant_id: str):
                 principal_id=user_id,
                 card=item,
             )
-        except Exception:
+        except Exception as exc:
+            _append_lazy_report_failure_audit_event(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                card=item,
+                exc=exc,
+            )
             hydrated_items.append(item)
             continue
 
@@ -87,7 +134,13 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
             "headline": report["summary"].get("headline"),
             "snapshot_time": report.get("snapshot_time"),
         }
-    except Exception:
+    except Exception as exc:
+        _append_lazy_report_failure_audit_event(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            card=card,
+            exc=exc,
+        )
         report_summary = None
 
     return {"card": card, "report_summary": report_summary}
