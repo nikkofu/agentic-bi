@@ -11,9 +11,18 @@ export const reportPreviewFixture: ReportPreviewPayload = {
     variables: [],
     data_bindings: [
       {
+        id: "binding-fixture-1",
         kind: "materialized_result",
         source_ref: "sq-fixture-1",
-        query_id: "sq-fixture-1"
+        query_id: "sq-fixture-1",
+        value: 0.32,
+        rows: [
+          { month: "2025-12", value: 0.28, gross_margin_rate: 0.28 },
+          { month: "2026-01", value: 0.3, gross_margin_rate: 0.3 },
+          { month: "2026-02", value: 0.32, gross_margin_rate: 0.32 }
+        ],
+        insight: "华东区毛利率持续改善，最近一个月达到 32%。",
+        text: "本报表由自动化分析生成。"
       }
     ],
     interactions: [],
@@ -35,7 +44,9 @@ export const reportPreviewFixture: ReportPreviewPayload = {
                 presentation: {
                   family: "kpi",
                   variant: "primary",
-                  config: {}
+                  config: {
+                    metric: "gross_margin_rate"
+                  }
                 },
                 binding: {
                   source_ref: "sq-fixture-1",
@@ -47,7 +58,7 @@ export const reportPreviewFixture: ReportPreviewPayload = {
                 kind: "chart",
                 title: "趋势/分布",
                 presentation: {
-                  family: "table_like",
+                  family: "line",
                   variant: "auto",
                   config: {
                     metric: "gross_margin_rate"
@@ -71,6 +82,20 @@ export const reportPreviewFixture: ReportPreviewPayload = {
                 binding: {
                   source_ref: "sq-fixture-1",
                   value_path: "$.narrative"
+                }
+              },
+              {
+                id: "widget-text-1",
+                kind: "text",
+                title: "备注",
+                presentation: {
+                  family: "text",
+                  variant: "note",
+                  config: {}
+                },
+                binding: {
+                  source_ref: "sq-fixture-1",
+                  value_path: "text"
                 }
               }
             ]

@@ -41,6 +41,17 @@ export interface DashboardPageSpec {
   sections: DashboardSection[];
 }
 
+export interface DataBinding {
+  id?: string;
+  source_ref: string;
+  kind: string;
+  query_id?: string | null;
+  value?: JsonValue;
+  rows?: JsonValue[];
+  insight?: string;
+  text?: string;
+}
+
 export interface DashboardSpec {
   id: string;
   version: string;
@@ -49,7 +60,7 @@ export interface DashboardSpec {
   theme: Record<string, JsonValue>;
   refresh_policy: Record<string, JsonValue>;
   variables: Record<string, JsonValue>[];
-  data_bindings: Record<string, JsonValue>[];
+  data_bindings: DataBinding[];
   interactions: Record<string, JsonValue>[];
   pages: DashboardPageSpec[];
 }

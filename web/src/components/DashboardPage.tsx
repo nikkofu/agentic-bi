@@ -12,7 +12,10 @@ export function DashboardPage({ dashboard }: { dashboard: DashboardSpec }) {
       {dashboard.pages.map((page) => (
         <section key={page.id} className="dashboard-page">
           {page.title ? <h2>{page.title}</h2> : null}
-          <WidgetRenderer widgets={page.sections.flatMap((section) => section.widgets)} />
+          <WidgetRenderer
+            widgets={page.sections.flatMap((section) => section.widgets)}
+            bindings={dashboard.data_bindings}
+          />
         </section>
       ))}
     </main>
