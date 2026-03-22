@@ -348,3 +348,34 @@ def test_dashboard_endpoints_persist_success_and_failure_audit_records(tmp_path,
     assert "DASHBOARD_SAVE_FAILED" in db_statuses
     assert "DASHBOARD_FETCHED" in db_statuses
     assert "DASHBOARD_FETCH_DENIED" in db_statuses
+
+
+def test_diagnostic_report_endpoints_persist_audit_records(tmp_path, monkeypatch):
+    db_path = tmp_path / "diagnostic-report-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+
+    generated = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+        },
+    )
+    assert generated.status_code == 200
+    report_id = generated.json()["report"]["id"]
+
+    denied = client.get(
+        f"/v1/reports/{report_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert denied.status_code == 403
+
+    statuses = {event["status"] for event in _AUDIT_EVENTS}
+    assert "DIAGNOSTIC_REPORT_GENERATED" in statuses
+    assert "DIAGNOSTIC_REPORT_FETCH_DENIED" in statuses
