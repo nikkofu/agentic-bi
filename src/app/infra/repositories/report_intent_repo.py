@@ -52,3 +52,18 @@ class ReportIntentRepository:
             raise KeyError(intent_id)
 
         return json.loads(row[0])
+
+    def get_for_owner(self, *, intent_id: str, tenant_id: str, principal_id: str) -> dict:
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                select(report_intents.c.payload).where(
+                    report_intents.c.id == intent_id,
+                    report_intents.c.tenant_id == tenant_id,
+                    report_intents.c.principal_id == principal_id,
+                )
+            ).fetchone()
+
+        if row is None:
+            raise KeyError(intent_id)
+
+        return json.loads(row[0])

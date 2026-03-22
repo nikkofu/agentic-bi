@@ -91,7 +91,10 @@ def test_generate_report_intent_endpoint_returns_protocol_document(tmp_path, mon
     assert body["permission_context"]["row_level_policy_ref"] == "sales-region:u-1"
     assert body["semantic_queries"][0]["measures"] == ["gross_margin_rate"]
 
-    stored = client.get(f"/v1/report-intents/{body['id']}")
+    stored = client.get(
+        f"/v1/report-intents/{body['id']}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
+    )
     assert stored.status_code == 200
     assert stored.json()["id"] == body["id"]
 
@@ -99,7 +102,10 @@ def test_generate_report_intent_endpoint_returns_protocol_document(tmp_path, mon
 def test_assemble_dashboard_endpoint_returns_preview_dashboard():
     client = TestClient(app)
     intent = build_intent_payload()
-    resp = client.post("/v1/dashboards:assemble", json={"intent": intent})
+    resp = client.post(
+        "/v1/dashboards:assemble",
+        json={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1", "intent": intent},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["dashboard"]["version"] == "1.0"
@@ -140,7 +146,10 @@ def test_generate_report_intent_endpoint_resolves_followup_from_conversation_con
 def test_assemble_dashboard_endpoint_represents_all_semantic_queries():
     client = TestClient(app)
     intent = build_multi_query_intent_payload()
-    resp = client.post("/v1/dashboards:assemble", json={"intent": intent})
+    resp = client.post(
+        "/v1/dashboards:assemble",
+        json={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1", "intent": intent},
+    )
     assert resp.status_code == 200
     body = resp.json()
 
@@ -154,3 +163,90 @@ def test_assemble_dashboard_endpoint_represents_all_semantic_queries():
         for widget in section["widgets"]
     }
     assert widget_refs == {"sq-1", "sq-2"}
+
+
+def test_assemble_dashboard_cannot_widen_access_with_forged_role_scope():
+    client = TestClient(app)
+    intent = build_intent_payload()
+    intent["permission_context"]["role_scope"] = ["region:华东", "region:华南"]
+    intent["semantic_queries"][0]["filters"] = [{"field": "region", "op": "=", "value": "华东"}]
+
+    resp = client.post(
+        "/v1/dashboards:assemble",
+        json={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south", "intent": intent},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_get_report_intent_denies_cross_user_access():
+    client = TestClient(app)
+    generated = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "conversation_id": "c-get-owner",
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert generated.status_code == 200
+    intent_id = generated.json()["id"]
+
+    denied = client.get(
+        f"/v1/report-intents/{intent_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert denied.status_code == 403
+
+
+def test_generate_report_intent_rejects_principal_mismatch():
+    client = TestClient(app)
+    resp = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-other",
+            "conversation_id": "c-principal-mismatch",
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_assemble_dashboard_rejects_principal_mismatch():
+    client = TestClient(app)
+    resp = client.post(
+        "/v1/dashboards:assemble",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-other",
+            "intent": build_intent_payload(),
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_get_report_intent_rejects_principal_mismatch():
+    client = TestClient(app)
+    generated = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "conversation_id": "c-get-principal-mismatch",
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert generated.status_code == 200
+    intent_id = generated.json()["id"]
+
+    resp = client.get(
+        f"/v1/report-intents/{intent_id}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-other"},
+    )
+    assert resp.status_code == 400
