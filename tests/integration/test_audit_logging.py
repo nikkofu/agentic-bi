@@ -3,6 +3,9 @@ from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
+from app.infra.repositories.dashboard_repo import DashboardRepository
+from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
+from app.infra.repositories.insight_repo import InsightRepository
 from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 
@@ -126,6 +129,85 @@ def _build_dashboard_save_payload() -> dict:
             ],
         },
     }
+
+
+def _build_insight_card_payload() -> dict:
+    return {
+        "card_id": "card-1",
+        "trace_id": "trace-1",
+        "metric": "gross_margin_rate",
+        "scope": {"region": "华东"},
+        "severity": "P1",
+        "summary": "检测到毛利率异常",
+        "attribution": {"dimension": "region", "key": "华东", "contribution": -0.06},
+        "suggested_next_question": "请分析华东区域毛利率下滑的主要驱动因素",
+        "report_id": None,
+        "dashboard_id": None,
+    }
+
+
+def _build_report_payload(
+    report_id: str = "dr-1",
+    dashboard_id: str = "dash-1",
+    source_kind: str = "insight_card",
+    source_ref: str = "card-1",
+) -> dict:
+    return {
+        "id": report_id,
+        "version": "1.0",
+        "tenant_id": "t-1",
+        "principal_id": "u-1",
+        "source_kind": source_kind,
+        "source_ref": source_ref,
+        "snapshot_time": "2026-03-22T10:00:00Z",
+        "status": "ready",
+        "summary": {
+            "title": "华东毛利率异常诊断",
+            "subtitle": "上个月",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+            "severity": "P1",
+            "headline": "毛利率低于基线 6 个点",
+        },
+        "findings": [],
+        "recommendations": [],
+        "dashboard_id": dashboard_id,
+        "report_intent_id": "ri-1",
+        "trace": {"trace_id": "trace-1"},
+    }
+
+
+def _build_dashboard_payload(dashboard_id: str = "dash-1") -> dict:
+    return {
+        "id": dashboard_id,
+        "version": "1.0",
+        "title": "华东毛利率异常诊断",
+        "description": "snapshot",
+        "theme": {"name": "paper"},
+        "refresh_policy": {"mode": "snapshot"},
+        "variables": [],
+        "data_bindings": [],
+        "interactions": [],
+        "pages": [{"id": "page-1", "title": "Overview", "layout": {"columns": 12}, "sections": []}],
+    }
+
+
+def _seed_insight_with_default_report() -> tuple[str, str]:
+    dashboard_repo = DashboardRepository()
+    report_repo = DiagnosticReportRepository()
+    insight_repo = InsightRepository()
+    dashboard = dashboard_repo.save(
+        tenant_id="t-1",
+        principal_id="u-1",
+        report_intent_id="ri-1",
+        dashboard=_build_dashboard_payload("dash-1"),
+        dashboard_id="dash-1",
+    )
+    report = report_repo.save(report=_build_report_payload(dashboard_id=dashboard["dashboard_id"]))
+    insight_repo.save_card(_build_insight_card_payload())
+    insight_repo.attach_report(card_id="card-1", report_id=report["id"], dashboard_id=dashboard["dashboard_id"])
+    return "card-1", report["id"]
 
 
 def test_chat_query_persists_audit_record(tmp_path, monkeypatch):
@@ -348,6 +430,77 @@ def test_dashboard_endpoints_persist_success_and_failure_audit_records(tmp_path,
     assert "DASHBOARD_SAVE_FAILED" in db_statuses
     assert "DASHBOARD_FETCHED" in db_statuses
     assert "DASHBOARD_FETCH_DENIED" in db_statuses
+
+
+def test_diagnostic_report_endpoints_persist_success_and_failure_audit_records(tmp_path, monkeypatch):
+    db_path = tmp_path / "diagnostic-report-audit.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+    card_id, report_id = _seed_insight_with_default_report()
+
+    generate_ok = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "from_insight",
+            "insight_card_id": card_id,
+        },
+    )
+    assert generate_ok.status_code == 200
+
+    fetch_ok = client.get(
+        f"/v1/reports/{report_id}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
+    )
+    assert fetch_ok.status_code == 200
+
+    generate_bad = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-other",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+        },
+    )
+    assert generate_bad.status_code == 400
+
+    fetch_denied = client.get(
+        f"/v1/reports/{report_id}",
+        params={"tenant_id": "t-1", "user_id": "u-south", "principal_id": "u-south"},
+    )
+    assert fetch_denied.status_code == 403
+
+    statuses = {event["status"] for event in _AUDIT_EVENTS}
+    assert "DIAGNOSTIC_REPORT_GENERATED" in statuses
+    assert "DIAGNOSTIC_REPORT_GENERATE_FAILED" in statuses
+    assert "DIAGNOSTIC_REPORT_FETCHED" in statuses
+    assert "DIAGNOSTIC_REPORT_FETCH_DENIED" in statuses
+
+    generated_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATED")
+    permission_context = generated_event["result_summary"]["permission_context"]
+    assert generated_event["result_summary"]["report_id"] == report_id
+    assert permission_context["principal_id"] == "u-1"
+    assert permission_context["role_scope"] == ["region:华东", "region:华南"]
+    assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT status, result_summary, error_code
+            FROM audit_events
+            """
+        ).fetchall()
+    db_statuses = {row[0] for row in rows}
+    assert "DIAGNOSTIC_REPORT_GENERATED" in db_statuses
+    assert "DIAGNOSTIC_REPORT_GENERATE_FAILED" in db_statuses
+    assert "DIAGNOSTIC_REPORT_FETCHED" in db_statuses
+    assert "DIAGNOSTIC_REPORT_FETCH_DENIED" in db_statuses
 
 
 def test_diagnostic_report_endpoints_persist_audit_records(tmp_path, monkeypatch):

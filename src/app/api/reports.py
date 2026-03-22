@@ -81,6 +81,68 @@ def _load_report_bundle(*, report_id: str, tenant_id: str, principal_id: str) ->
     return {"report": stored_report, "dashboard": stored_dashboard["dashboard"]}
 
 
+def _ensure_default_report_bundle_for_insight_card(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    card: dict,
+) -> tuple[dict, bool]:
+    report_repo = DiagnosticReportRepository()
+    report_id = card.get("report_id")
+    if report_id:
+        try:
+            return (
+                _load_report_bundle(
+                    report_id=report_id,
+                    tenant_id=tenant_id,
+                    principal_id=principal_id,
+                ),
+                True,
+            )
+        except KeyError:
+            pass
+
+    existing_report = report_repo.get_by_source_ref(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        source_kind="insight_card",
+        source_ref=card["card_id"],
+    )
+    if existing_report is not None:
+        return (
+            _load_report_bundle(
+                report_id=existing_report["id"],
+                tenant_id=tenant_id,
+                principal_id=principal_id,
+            ),
+            True,
+        )
+
+    created_or_existing = report_repo.get_or_create_default_for_insight(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        source_ref=card["card_id"],
+        create_fn=lambda: _persist_snapshot(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            question=card.get("suggested_next_question") or card.get("summary", "diagnostic-report"),
+            metric=card["metric"],
+            scope=card["scope"],
+            time_window="current",
+            source_kind="insight_card",
+            source_ref=card["card_id"],
+        )["report"],
+    )
+    return (
+        _load_report_bundle(
+            report_id=created_or_existing["id"],
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        ),
+        False,
+    )
+
+
 def _persist_snapshot(
     *,
     tenant_id: str,
@@ -235,12 +297,12 @@ def generate_report(req: ReportGenerateRequest):
             if not req.insight_card_id:
                 raise ValueError("MISSING_INSIGHT_CARD")
             card = InsightRepository().get(req.insight_card_id, allowed_regions)
-            if card.get("report_id"):
-                payload = _load_report_bundle(
-                    report_id=card["report_id"],
-                    tenant_id=req.tenant_id,
-                    principal_id=canonical_principal,
-                )
+            payload, reused_existing = _ensure_default_report_bundle_for_insight_card(
+                tenant_id=req.tenant_id,
+                principal_id=canonical_principal,
+                card=card,
+            )
+            if reused_existing:
                 _append_report_audit_event(
                     trace_id=trace_id,
                     status="DIAGNOSTIC_REPORT_GENERATED",
@@ -252,22 +314,7 @@ def generate_report(req: ReportGenerateRequest):
                         "entry_mode": "insight_card_cached",
                     },
                 )
-                return payload
-
-            metric = card["metric"]
-            scope = card["scope"]
-            time_window = "current"
-            question = card.get("suggested_next_question") or card.get("summary", "diagnostic-report")
-            return _persist_snapshot(
-                tenant_id=req.tenant_id,
-                principal_id=canonical_principal,
-                question=question,
-                metric=metric,
-                scope=scope,
-                time_window=time_window,
-                source_kind="insight_card",
-                source_ref=req.insight_card_id,
-            )
+            return payload
 
         if req.mode == "direct":
             if not req.metric or not req.scope or not req.time_window:

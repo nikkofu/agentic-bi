@@ -92,7 +92,12 @@ def test_get_report_returns_report_metadata_and_embedded_dashboard(tmp_path, mon
     db_path = tmp_path / "reports-api.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
     _, report_id = seed_insight_with_default_report()
-    resp = client.get(f"/v1/reports/{report_id}", params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"})
+
+    resp = client.get(
+        f"/v1/reports/{report_id}",
+        params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
+    )
+
     assert resp.status_code == 200
     assert resp.json()["report"]["id"] == report_id
     assert resp.json()["dashboard"]["id"] == resp.json()["report"]["dashboard_id"]
@@ -102,6 +107,7 @@ def test_post_reports_generate_from_insight_returns_existing_default_snapshot(tm
     db_path = tmp_path / "reports-api-from-insight.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
     card_id, seeded_report_id = seed_insight_with_default_report()
+
     resp = client.post(
         "/v1/reports:generate",
         json={
@@ -112,6 +118,7 @@ def test_post_reports_generate_from_insight_returns_existing_default_snapshot(tm
             "insight_card_id": card_id,
         },
     )
+
     assert resp.status_code == 200
     assert resp.json()["report"]["source_kind"] == "insight_card"
     assert resp.json()["report"]["id"] == seeded_report_id
@@ -120,6 +127,7 @@ def test_post_reports_generate_from_insight_returns_existing_default_snapshot(tm
 def test_post_reports_generate_direct_creates_new_snapshot(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-direct.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
     resp = client.post(
         "/v1/reports:generate",
         json={
@@ -132,6 +140,7 @@ def test_post_reports_generate_direct_creates_new_snapshot(tmp_path, monkeypatch
             "time_window": "last_month",
         },
     )
+
     assert resp.status_code == 200
     assert resp.json()["report"]["source_kind"] == "on_demand"
     assert resp.json()["dashboard"]["pages"][0]["title"] == "Overview"
@@ -141,7 +150,9 @@ def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-card-detail.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
     card_id, report_id = seed_insight_with_default_report()
+
     resp = client.get(f"/v1/insights/cards/{card_id}", params={"tenant_id": "t-1", "user_id": "u-1"})
+
     assert resp.status_code == 200
     assert resp.json()["card"]["report_id"] == report_id
     assert resp.json()["report_summary"]["report_id"] == report_id
