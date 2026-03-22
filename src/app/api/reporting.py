@@ -3,14 +3,20 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from app.domain.models import QueryPlan
+from app.domain.reporting_models import DashboardPage
+from app.domain.reporting_models import DashboardSection
+from app.domain.reporting_models import DashboardSpec
+from app.domain.reporting_models import DashboardWidget
 from app.domain.reporting_models import ReportIntent
+from app.domain.reporting_models import WidgetBinding
+from app.domain.reporting_models import WidgetPresentation
 from app.infra.repositories.report_intent_repo import ReportIntentRepository
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event, new_trace_id
+from app.services.conversation_memory import save_last_plan
 from app.services.dashboard_assembler import assemble_dashboard
-from app.services.intent_parser import parse_intent
 from app.services.query_executor import execute_query
-from app.services.query_planner import build_query_plan
+from app.services.query_plan_resolver import resolve_plan_for_question
 from app.services.query_validator import validate_plan
 from app.services.report_intent_builder import build_report_intent
 
@@ -39,10 +45,15 @@ def build_permission_context(*, principal_id: str, role_scope: list[str], row_le
 
 def execute_reporting_preview(req: ReportingGenerateRequest) -> tuple[QueryPlan, dict, str]:
     trace_id = new_trace_id()
-    parsed_intent = parse_intent(req.question)
-    plan = build_query_plan(parsed_intent)
+    plan = resolve_plan_for_question(
+        tenant_id=req.tenant_id,
+        user_id=req.user_id,
+        conversation_id=req.conversation_id,
+        question=req.question,
+    )
     allowed_regions = resolve_allowed_regions(req.user_id, req.tenant_id)
     validate_plan(plan, allowed_regions=allowed_regions)
+    save_last_plan(req.tenant_id, req.user_id, req.conversation_id, plan)
     result = execute_query(plan, scope={"allowed_regions": allowed_regions})
     return plan, result, trace_id
 
@@ -55,8 +66,7 @@ def _allowed_regions_from_role_scope(role_scope: list[str]) -> list[str]:
     return regions
 
 
-def execute_semantic_queries_from_intent(intent: ReportIntent) -> dict:
-    query = intent.semantic_queries[0]
+def _build_query_plan_from_semantic_query(query) -> QueryPlan:
     filters = {}
     for query_filter in query.filters:
         if query_filter.get("op") != "=":
@@ -66,7 +76,7 @@ def execute_semantic_queries_from_intent(intent: ReportIntent) -> dict:
         if isinstance(field, str) and isinstance(value, str):
             filters[field] = value
 
-    plan = QueryPlan(
+    return QueryPlan(
         metric=query.measures[0] if query.measures else "",
         filters=filters,
         time_window=query.time.get("window", "current"),
@@ -75,9 +85,104 @@ def execute_semantic_queries_from_intent(intent: ReportIntent) -> dict:
         group_requested=bool(query.dimensions),
     )
 
+
+def execute_semantic_queries_from_intent(intent: ReportIntent) -> list[dict]:
     allowed_regions = _allowed_regions_from_role_scope(intent.permission_context.role_scope)
-    validate_plan(plan, allowed_regions=allowed_regions)
-    return execute_query(plan, scope={"allowed_regions": allowed_regions})
+    executed_queries: list[dict] = []
+    for query in intent.semantic_queries:
+        plan = _build_query_plan_from_semantic_query(query)
+        validate_plan(plan, allowed_regions=allowed_regions)
+        result = execute_query(plan, scope={"allowed_regions": allowed_regions})
+        executed_queries.append({"query_id": query.id, "query": query, "result": result})
+    return executed_queries
+
+
+def _chart_rows(result: dict) -> list[dict]:
+    series = result.get("series", [])
+    if series:
+        return [dict(row) for row in series]
+
+    breakdown = result.get("breakdown", [])
+    if breakdown:
+        return [dict(row) for row in breakdown]
+
+    return [dict(result)]
+
+
+def _build_multi_query_dashboard(*, intent: ReportIntent, executed_queries: list[dict]) -> DashboardSpec:
+    trace_id = intent.trace.get("trace_id", "unknown")
+    data_bindings = []
+    sections = []
+    for index, executed in enumerate(executed_queries, start=1):
+        query = executed["query"]
+        result = executed["result"]
+        source_ref = executed["query_id"]
+        metric = query.measures[0] if query.measures else ""
+
+        data_bindings.append(
+            {
+                "id": f"binding-{trace_id}-{source_ref}",
+                "source_ref": source_ref,
+                "kind": "materialized_result",
+                "value": result.get("value"),
+                "rows": _chart_rows(result),
+                "insight": "auto",
+            }
+        )
+        sections.append(
+            DashboardSection(
+                id=f"section-overview-{trace_id}-{source_ref}",
+                title=f"Query {index}",
+                layout={"columns": 12},
+                widgets=[
+                    DashboardWidget(
+                        id=f"widget-metric-{trace_id}-{source_ref}",
+                        kind="metric_card",
+                        title="核心指标",
+                        presentation=WidgetPresentation(family="kpi", variant="primary"),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="value"),
+                    ),
+                    DashboardWidget(
+                        id=f"widget-chart-{trace_id}-{source_ref}",
+                        kind="chart",
+                        title="趋势/分布",
+                        presentation=WidgetPresentation(
+                            family="table_like",
+                            variant="auto",
+                            config={"metric": metric},
+                        ),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="rows"),
+                    ),
+                    DashboardWidget(
+                        id=f"widget-insight-{trace_id}-{source_ref}",
+                        kind="insight",
+                        title="解读",
+                        presentation=WidgetPresentation(family="narrative", variant="auto"),
+                        binding=WidgetBinding(source_ref=source_ref, value_path="insight"),
+                    ),
+                ],
+            )
+        )
+
+    return DashboardSpec(
+        id=f"dash-preview-{trace_id}",
+        version="1.0",
+        title=intent.question,
+        description="Auto-generated dashboard preview",
+        theme={"name": "paper"},
+        refresh_policy={"mode": "manual"},
+        variables=[],
+        data_bindings=data_bindings,
+        interactions=[],
+        pages=[
+            DashboardPage(
+                id=f"page-overview-{trace_id}",
+                title="Overview",
+                layout={"columns": 12},
+                sections=sections,
+            )
+        ],
+    )
 
 
 def _normalize_dashboard_binding_kinds(dashboard_payload: dict) -> dict:
@@ -141,12 +246,15 @@ def get_report_intent(intent_id: str):
 @router.post("/dashboards:assemble")
 def assemble_dashboard_preview(req: ReportingAssembleRequest):
     try:
-        result = execute_semantic_queries_from_intent(req.intent)
+        executed_queries = execute_semantic_queries_from_intent(req.intent)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error_code": str(exc)}) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc
 
-    dashboard = assemble_dashboard(intent=req.intent, result=result)
+    if len(executed_queries) == 1:
+        dashboard = assemble_dashboard(intent=req.intent, result=executed_queries[0]["result"])
+    else:
+        dashboard = _build_multi_query_dashboard(intent=req.intent, executed_queries=executed_queries)
     dashboard_payload = _normalize_dashboard_binding_kinds(dashboard.model_dump(mode="python"))
     return {"dashboard": dashboard_payload}

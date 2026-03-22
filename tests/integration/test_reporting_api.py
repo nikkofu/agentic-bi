@@ -37,6 +37,37 @@ def build_intent_payload() -> dict:
     }
 
 
+def build_multi_query_intent_payload() -> dict:
+    payload = build_intent_payload()
+    payload["semantic_queries"] = [
+        {
+            "id": "sq-1",
+            "kind": "metric_query",
+            "measures": ["gross_margin_rate"],
+            "dimensions": [],
+            "filters": [{"field": "region", "op": "=", "value": "华东"}],
+            "time": {"window": "last_month"},
+            "comparison": None,
+            "sort": None,
+            "limit": None,
+            "display_hint": {},
+        },
+        {
+            "id": "sq-2",
+            "kind": "metric_query",
+            "measures": ["revenue"],
+            "dimensions": ["month"],
+            "filters": [{"field": "region", "op": "=", "value": "华东"}],
+            "time": {"window": "recent_3_months"},
+            "comparison": None,
+            "sort": None,
+            "limit": None,
+            "display_hint": {},
+        },
+    ]
+    return payload
+
+
 def test_generate_report_intent_endpoint_returns_protocol_document(tmp_path, monkeypatch):
     db_path = tmp_path / "report-intents.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -73,3 +104,53 @@ def test_assemble_dashboard_endpoint_returns_preview_dashboard():
     body = resp.json()
     assert body["dashboard"]["version"] == "1.0"
     assert body["dashboard"]["data_bindings"][0]["kind"] == "materialized_result"
+
+
+def test_generate_report_intent_endpoint_resolves_followup_from_conversation_context():
+    client = TestClient(app)
+    conversation_id = "c-followup-reporting-preview"
+
+    initial_resp = client.post(
+        "/v1/chat/query",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "conversation_id": conversation_id,
+            "question": "上个月华东区毛利率是多少？",
+        },
+    )
+    assert initial_resp.status_code == 200
+
+    followup_resp = client.post(
+        "/v1/report-intents:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "conversation_id": conversation_id,
+            "question": "按月看",
+        },
+    )
+    assert followup_resp.status_code == 200
+    body = followup_resp.json()
+    assert body["semantic_queries"][0]["time"]["window"] == "recent_3_months"
+    assert body["semantic_queries"][0]["dimensions"] == ["month"]
+
+
+def test_assemble_dashboard_endpoint_represents_all_semantic_queries():
+    client = TestClient(app)
+    intent = build_multi_query_intent_payload()
+    resp = client.post("/v1/dashboards:assemble", json={"intent": intent})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    binding_refs = {binding["source_ref"] for binding in body["dashboard"]["data_bindings"]}
+    assert binding_refs == {"sq-1", "sq-2"}
+
+    widget_refs = {
+        widget["binding"]["source_ref"]
+        for page in body["dashboard"]["pages"]
+        for section in page["sections"]
+        for widget in section["widgets"]
+    }
+    assert widget_refs == {"sq-1", "sq-2"}
