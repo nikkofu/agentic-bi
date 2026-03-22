@@ -174,3 +174,44 @@ class InsightRepository:
                   AND (detail_url IS NULL OR TRIM(detail_url) = '')
                 """
             )
+
+            rows = connection.exec_driver_sql(
+                "SELECT id, card_id FROM insight_cards ORDER BY id"
+            ).fetchall()
+            seen_card_ids: set[str] = set()
+            for row_id, card_id in rows:
+                normalized = str(card_id).strip() if card_id is not None else ""
+                if not normalized:
+                    normalized = f"card-legacy-{row_id}"
+                candidate = normalized
+                if candidate in seen_card_ids:
+                    candidate = f"{normalized}-dup-{row_id}"
+                    suffix = 1
+                    while candidate in seen_card_ids:
+                        suffix += 1
+                        candidate = f"{normalized}-dup-{row_id}-{suffix}"
+                seen_card_ids.add(candidate)
+                if candidate != card_id:
+                    connection.exec_driver_sql(
+                        "UPDATE insight_cards SET card_id = ? WHERE id = ?",
+                        (candidate, row_id),
+                    )
+
+            if not self._has_unique_card_id_index(connection):
+                connection.exec_driver_sql(
+                    "CREATE UNIQUE INDEX ux_insight_cards_card_id ON insight_cards(card_id)"
+                )
+
+    @staticmethod
+    def _has_unique_card_id_index(connection) -> bool:
+        indexes = connection.exec_driver_sql("PRAGMA index_list(insight_cards)").fetchall()
+        for index in indexes:
+            index_name = index[1]
+            is_unique = bool(index[2])
+            if not is_unique:
+                continue
+            escaped_name = str(index_name).replace('"', '""')
+            index_columns = connection.exec_driver_sql(f'PRAGMA index_info("{escaped_name}")').fetchall()
+            if len(index_columns) == 1 and index_columns[0][2] == "card_id":
+                return True
+        return False
