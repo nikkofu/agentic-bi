@@ -1,5 +1,7 @@
 import json
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone
 
 from sqlalchemy import Column
 from sqlalchemy import MetaData
@@ -72,19 +74,20 @@ class DiagnosticReportRepository:
         self, tenant_id: str, principal_id: str, source_kind: str, source_ref: str
     ) -> dict | None:
         with self.engine.begin() as connection:
-            row = connection.execute(
+            rows = connection.execute(
                 select(diagnostic_reports.c.payload).where(
                     diagnostic_reports.c.tenant_id == tenant_id,
                     diagnostic_reports.c.principal_id == principal_id,
                     diagnostic_reports.c.source_kind == source_kind,
                     diagnostic_reports.c.source_ref == source_ref,
-                ).order_by(diagnostic_reports.c.snapshot_time.desc())
-            ).fetchone()
+                )
+            ).fetchall()
 
-        if row is None:
+        if not rows:
             return None
 
-        return json.loads(row[0])
+        payloads = [json.loads(row[0]) for row in rows]
+        return max(payloads, key=self._snapshot_time_sort_key)
 
     def get_or_create_default_for_insight(
         self,
@@ -104,3 +107,12 @@ class DiagnosticReportRepository:
             return existing
 
         return create_fn()
+
+    @staticmethod
+    def _snapshot_time_sort_key(report: dict) -> datetime:
+        raw_value = str(report["snapshot_time"]).strip()
+        normalized = raw_value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)

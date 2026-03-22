@@ -204,6 +204,32 @@ def test_report_repo_allows_multiple_on_demand_snapshots_for_same_source_ref(tmp
     assert total_rows == 2
 
 
+def test_report_repo_get_by_source_ref_uses_chronological_snapshot_time(tmp_path, monkeypatch):
+    db_path = tmp_path / "report-source-ref-chronological.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    reports = DiagnosticReportRepository()
+
+    first = build_report_payload(report_id="dr-time-1", dashboard_id="dash-1")
+    first["snapshot_time"] = "2026-03-22T18:00:00+09:00"  # 09:00Z
+    second = build_report_payload(report_id="dr-time-2", dashboard_id="dash-2")
+    second["snapshot_time"] = "2026-03-22T09:45:00Z"  # 09:45Z
+    third = build_report_payload(report_id="dr-time-3", dashboard_id="dash-3")
+    third["snapshot_time"] = "2026-03-22T10:30:00+01:00"  # 09:30Z
+
+    reports.save(first)
+    reports.save(second)
+    reports.save(third)
+
+    latest = reports.get_by_source_ref(
+        tenant_id="t-1",
+        principal_id="u-1",
+        source_kind="insight_card",
+        source_ref="card-1",
+    )
+
+    assert latest["id"] == "dr-time-2"
+
+
 def test_insight_repo_attach_report_and_get_by_card_id(tmp_path, monkeypatch):
     db_path = tmp_path / "insight-linkage.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
