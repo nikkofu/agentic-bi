@@ -25,6 +25,7 @@ from app.services.query_validator import validate_plan
 from app.services.report_intent_builder import build_report_intent
 
 router = APIRouter(prefix="/v1")
+DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED = "DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED"
 
 
 class ReportGenerateRequest(BaseModel):
@@ -326,6 +327,7 @@ def get_report(report_id: str, tenant_id: str, user_id: str, principal_id: str |
 @router.post("/reports:generate")
 def generate_report(req: ReportGenerateRequest):
     trace_id = new_trace_id()
+    permission_context = None
     try:
         canonical_principal, allowed_regions, permission_context = _resolve_identity_context(
             tenant_id=req.tenant_id,
@@ -404,3 +406,19 @@ def generate_report(req: ReportGenerateRequest):
             error_code=str(exc),
         )
         raise HTTPException(status_code=403, detail={"error_code": str(exc)}) from exc
+    except Exception as exc:
+        fallback_permission_context = permission_context or _safe_permission_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+        )
+        _append_report_audit_event(
+            trace_id=trace_id,
+            status="DIAGNOSTIC_REPORT_GENERATE_FAILED",
+            permission_context=fallback_permission_context,
+            question="diagnostic-report:generate",
+            error_code=DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED},
+        ) from exc

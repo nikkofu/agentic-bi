@@ -47,3 +47,20 @@ it("passes viewer identity from report route query params", async () => {
     undefined,
   );
 });
+
+it("fills a missing principal_id from the report route user_id", async () => {
+  const fetchMock = vi.fn().mockImplementationOnce(() => mockJsonResponse(diagnosticReportFixture));
+  global.fetch = fetchMock;
+
+  render(
+    <MemoryRouter initialEntries={["/reports/dr-1?tenant_id=t-1&user_id=u-south"]}>
+      <App />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(screen.getByText("Diagnostic Report")).toBeInTheDocument());
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/v1/reports/dr-1?tenant_id=t-1&user_id=u-south&principal_id=u-south"),
+    undefined,
+  );
+});

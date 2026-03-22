@@ -9,10 +9,12 @@ const DEFAULT_VIEWER_CONTEXT = {
 export type ViewerContext = typeof DEFAULT_VIEWER_CONTEXT;
 
 export function resolveViewerContext(overrides?: Partial<ViewerContext>): ViewerContext {
+  const userId = overrides?.user_id ?? overrides?.principal_id ?? DEFAULT_VIEWER_CONTEXT.user_id;
+  const principalId = overrides?.principal_id ?? overrides?.user_id ?? DEFAULT_VIEWER_CONTEXT.principal_id;
   return {
     tenant_id: overrides?.tenant_id ?? DEFAULT_VIEWER_CONTEXT.tenant_id,
-    user_id: overrides?.user_id ?? DEFAULT_VIEWER_CONTEXT.user_id,
-    principal_id: overrides?.principal_id ?? DEFAULT_VIEWER_CONTEXT.principal_id,
+    user_id: userId,
+    principal_id: principalId,
   };
 }
 

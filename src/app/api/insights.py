@@ -28,11 +28,16 @@ def list_insight_cards(user_id: str, tenant_id: str):
     items = InsightRepository().list_by_regions(allowed_regions)
     hydrated_items = []
     for item in items:
-        report_bundle, _ = _ensure_default_report_bundle_for_insight_card(
-            tenant_id=tenant_id,
-            principal_id=user_id,
-            card=item,
-        )
+        try:
+            report_bundle, _ = _ensure_default_report_bundle_for_insight_card(
+                tenant_id=tenant_id,
+                principal_id=user_id,
+                card=item,
+            )
+        except Exception:
+            hydrated_items.append(item)
+            continue
+
         hydrated_items.append(
             {
                 **item,
@@ -82,7 +87,7 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
             "headline": report["summary"].get("headline"),
             "snapshot_time": report.get("snapshot_time"),
         }
-    except KeyError:
+    except Exception:
         report_summary = None
 
     return {"card": card, "report_summary": report_summary}

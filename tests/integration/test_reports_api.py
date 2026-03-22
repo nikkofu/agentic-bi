@@ -1,6 +1,5 @@
 import sqlite3
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.infra.repositories.dashboard_repo import DashboardRepository
@@ -11,6 +10,7 @@ from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 
 client = TestClient(app)
+DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED = "DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED"
 
 
 def count_rows_or_zero(connection: sqlite3.Connection, table_name: str) -> int:
@@ -402,28 +402,58 @@ def test_report_endpoints_persist_success_and_failure_audit_records(tmp_path, mo
 def test_post_reports_generate_direct_rolls_back_snapshot_artifacts_on_report_save_failure(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-direct-rollback.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
 
     def raise_report_save_failure(self, report, connection=None):
         raise RuntimeError("report-save-failed")
 
     monkeypatch.setattr(DiagnosticReportRepository, "save", raise_report_save_failure)
 
-    with pytest.raises(RuntimeError, match="report-save-failed"):
-        client.post(
-            "/v1/reports:generate",
-            json={
-                "tenant_id": "t-1",
-                "user_id": "u-1",
-                "principal_id": "u-1",
-                "mode": "direct",
-                "metric": "gross_margin_rate",
-                "scope": {"region": "华东"},
-                "time_window": "last_month",
-            },
-        )
+    resp = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "time_window": "last_month",
+        },
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"]["error_code"] == DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
 
     with sqlite3.connect(db_path) as connection:
         assert count_rows_or_zero(connection, "report_intents") == 0
         assert count_rows_or_zero(connection, "dashboards") == 0
         assert count_rows_or_zero(connection, "dashboard_revisions") == 0
         assert count_rows_or_zero(connection, "diagnostic_reports") == 0
+
+    failed_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED")
+    assert failed_event["error_code"] == DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
+
+
+def test_insight_card_endpoints_keep_cards_visible_when_lazy_report_creation_fails(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-lazy-insight-report-failure.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    seeded_card = seed_insight_without_report("card-lazy-fail")
+
+    def raise_report_save_failure(self, report, connection=None):
+        raise RuntimeError("report-save-failed")
+
+    monkeypatch.setattr(DiagnosticReportRepository, "save", raise_report_save_failure)
+
+    list_resp = client.get("/v1/insights/cards", params={"tenant_id": "t-1", "user_id": "u-1"})
+    assert list_resp.status_code == 200
+    listed_card = next(item for item in list_resp.json()["items"] if item["card_id"] == seeded_card["card_id"])
+    assert listed_card["report_id"] is None
+    assert listed_card["dashboard_id"] is None
+    assert listed_card["detail_url"] is None
+
+    detail_resp = client.get(f"/v1/insights/cards/{seeded_card['card_id']}", params={"tenant_id": "t-1", "user_id": "u-1"})
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["card"]["report_id"] is None
+    assert detail_resp.json()["card"]["dashboard_id"] is None
+    assert detail_resp.json()["report_summary"] is None

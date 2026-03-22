@@ -82,3 +82,33 @@ it("loads a saved dashboard from the backend", async () => {
   await waitFor(() => expect(screen.getByText("Auto Reporting Preview")).toBeInTheDocument());
   expect(screen.getByText("核心指标")).toBeInTheDocument();
 });
+
+it("fills a missing user_id from the saved dashboard principal_id", async () => {
+  const fetchMock = vi.fn().mockImplementationOnce(() =>
+    mockJsonResponse({
+      dashboard_id: reportPreviewFixture.dashboard.id,
+      report_intent_id: "ri-preview-1",
+      current_revision_id: "rev-1",
+      published_revision_id: "rev-1",
+      dashboard: reportPreviewFixture.dashboard,
+      report_intent: previewIntent,
+    }),
+  );
+  global.fetch = fetchMock;
+
+  render(
+    <MemoryRouter
+      initialEntries={[`/dashboards/${reportPreviewFixture.dashboard.id}?tenant_id=t-1&principal_id=u-south`]}
+    >
+      <App />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(screen.getByText("Auto Reporting Preview")).toBeInTheDocument());
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining(
+      `/v1/dashboards/${reportPreviewFixture.dashboard.id}?tenant_id=t-1&user_id=u-south&principal_id=u-south`,
+    ),
+    undefined,
+  );
+});
