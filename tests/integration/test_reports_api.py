@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.infra.repositories.dashboard_repo import DashboardRepository
 from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
+from app.infra.repositories.report_intent_repo import ReportIntentRepository
 from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 
@@ -88,6 +89,14 @@ def seed_insight_with_default_report() -> tuple[str, str]:
     return "card-1", report["id"]
 
 
+def seed_insight_without_report(card_id: str = "card-new") -> dict:
+    card = build_insight_card_payload()
+    card["card_id"] = card_id
+    card["trace_id"] = f"trace-{card_id}"
+    InsightRepository().save_card(card)
+    return card
+
+
 def test_get_report_returns_report_metadata_and_embedded_dashboard(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -124,6 +133,49 @@ def test_post_reports_generate_from_insight_returns_existing_default_snapshot(tm
     assert resp.json()["report"]["id"] == seeded_report_id
 
 
+def test_post_reports_generate_from_insight_creates_snapshot_with_planned_defaults(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-from-insight-new.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    card = seed_insight_without_report("card-new")
+
+    resp = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "from_insight",
+            "insight_card_id": card["card_id"],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["report"]["source_kind"] == "insight_card"
+    assert body["report"]["source_ref"] == card["card_id"]
+    assert body["report"]["summary"]["time_window"] == "last_month"
+    assert body["report"]["summary"]["title"] == f"{card['suggested_next_question']} 诊断报告"
+    assert body["report"]["findings"] == [
+        {
+            "kind": "trend",
+            "title": "异常延续",
+            "statement": card["summary"],
+            "evidence_refs": [card["trace_id"]],
+        }
+    ]
+    assert body["report"]["recommendations"] == [
+        {
+            "kind": "question",
+            "label": "继续诊断",
+            "question": card["suggested_next_question"],
+            "rationale": "从异常卡片继续下钻",
+        }
+    ]
+
+    intent = ReportIntentRepository().get(body["report"]["report_intent_id"])
+    assert intent["question"] == card["suggested_next_question"]
+
+
 def test_post_reports_generate_direct_creates_new_snapshot(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-direct.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
@@ -144,6 +196,46 @@ def test_post_reports_generate_direct_creates_new_snapshot(tmp_path, monkeypatch
     assert resp.status_code == 200
     assert resp.json()["report"]["source_kind"] == "on_demand"
     assert resp.json()["dashboard"]["pages"][0]["title"] == "Overview"
+
+    intent = ReportIntentRepository().get(resp.json()["report"]["report_intent_id"])
+    assert intent["question"] == "请生成{'region': '华东'}gross_margin_rate诊断报告"
+
+
+def test_post_reports_generate_requires_insight_card_id_error_code(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-missing-card-id.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
+    resp = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "from_insight",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error_code"] == "MISSING_INSIGHT_CARD_ID"
+
+
+def test_post_reports_generate_requires_direct_params_error_code(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-missing-direct-params.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+
+    resp = client.post(
+        "/v1/reports:generate",
+        json={
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "principal_id": "u-1",
+            "mode": "direct",
+            "metric": "gross_margin_rate",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error_code"] == "MISSING_DIRECT_REPORT_PARAMS"
 
 
 def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):

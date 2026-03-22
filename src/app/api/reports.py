@@ -125,12 +125,28 @@ def _ensure_default_report_bundle_for_insight_card(
         create_fn=lambda: _persist_snapshot(
             tenant_id=tenant_id,
             principal_id=principal_id,
-            question=card.get("suggested_next_question") or card.get("summary", "diagnostic-report"),
+            question=card["suggested_next_question"],
             metric=card["metric"],
             scope=card["scope"],
-            time_window="current",
+            time_window="last_month",
             source_kind="insight_card",
             source_ref=card["card_id"],
+            findings=[
+                {
+                    "kind": "trend",
+                    "title": "异常延续",
+                    "statement": card["summary"],
+                    "evidence_refs": [card["trace_id"]],
+                }
+            ],
+            recommendations=[
+                {
+                    "kind": "question",
+                    "label": "继续诊断",
+                    "question": card["suggested_next_question"],
+                    "rationale": "从异常卡片继续下钻",
+                }
+            ],
         )["report"],
     )
     return (
@@ -295,7 +311,7 @@ def generate_report(req: ReportGenerateRequest):
         )
         if req.mode == "from_insight":
             if not req.insight_card_id:
-                raise ValueError("MISSING_INSIGHT_CARD")
+                raise ValueError("MISSING_INSIGHT_CARD_ID")
             card = InsightRepository().get(req.insight_card_id, allowed_regions)
             payload, reused_existing = _ensure_default_report_bundle_for_insight_card(
                 tenant_id=req.tenant_id,
@@ -318,9 +334,9 @@ def generate_report(req: ReportGenerateRequest):
 
         if req.mode == "direct":
             if not req.metric or not req.scope or not req.time_window:
-                raise ValueError("MISSING_DIRECT_REQUEST")
-            source_ref = f"direct:{canonical_principal}:{req.metric}:{req.time_window}"
-            question = f"{req.metric} {req.time_window} 诊断"
+                raise ValueError("MISSING_DIRECT_REPORT_PARAMS")
+            source_ref = f"direct:{req.user_id}:{req.metric}:{req.time_window}"
+            question = f"请生成{req.scope}{req.metric}诊断报告"
             return _persist_snapshot(
                 tenant_id=req.tenant_id,
                 principal_id=canonical_principal,
