@@ -15,6 +15,20 @@ def _binding_ref(report: DiagnosticReport, source_ref: str) -> str:
     return f"binding-{report.id}-{source_ref}"
 
 
+def _materialized_binding(
+    *,
+    report: DiagnosticReport,
+    source_ref: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "id": _binding_ref(report, source_ref),
+        "source_ref": source_ref,
+        "kind": "materialized_result",
+    }
+
+
 def build_overview_page(report: DiagnosticReport) -> DashboardPage:
     source_ref = "overview"
     section = DashboardSection(
@@ -107,18 +121,16 @@ def assemble_diagnostic_dashboard(
     report: DiagnosticReport,
     result_bindings: dict[str, dict[str, Any]],
 ) -> DashboardSpec:
-    overview_binding: dict[str, Any] = {
-        "id": _binding_ref(report, "overview"),
-        "source_ref": "overview",
-        "kind": "materialized_result",
-        **result_bindings["overview"],
-    }
-    drivers_binding: dict[str, Any] = {
-        "id": _binding_ref(report, "drivers"),
-        "source_ref": "drivers",
-        "kind": "materialized_result",
-        **result_bindings["drivers"],
-    }
+    overview_binding = _materialized_binding(
+        report=report,
+        source_ref="overview",
+        payload=result_bindings["overview"],
+    )
+    drivers_binding = _materialized_binding(
+        report=report,
+        source_ref="drivers",
+        payload=result_bindings["drivers"],
+    )
 
     return DashboardSpec(
         id=report.dashboard_id,

@@ -26,3 +26,32 @@ def test_assemble_diagnostic_dashboard_preserves_report_dashboard_id():
         result_bindings={"overview": {"value": 0.24, "rows": []}, "drivers": {"rows": []}},
     )
     assert dashboard.id == "dash-existing-1"
+
+
+def test_assemble_diagnostic_dashboard_data_binding_contract_fields_cannot_be_overridden():
+    report = diagnostic_report_fixture()
+    dashboard = assemble_diagnostic_dashboard(
+        report=report,
+        result_bindings={
+            "overview": {
+                "id": "caller-overview-id",
+                "source_ref": "caller-overview-source",
+                "kind": "caller-overview-kind",
+                "value": 0.24,
+                "rows": [{"month": "2026-02", "value": 0.24}],
+            },
+            "drivers": {
+                "id": "caller-drivers-id",
+                "source_ref": "caller-drivers-source",
+                "kind": "caller-drivers-kind",
+                "rows": [{"region": "华东", "value": -0.06}],
+            },
+        },
+    )
+    bindings_by_source = {binding["source_ref"]: binding for binding in dashboard.data_bindings}
+    assert set(bindings_by_source.keys()) == {"overview", "drivers"}
+
+    assert bindings_by_source["overview"]["id"] == f"binding-{report.id}-overview"
+    assert bindings_by_source["overview"]["kind"] == "materialized_result"
+    assert bindings_by_source["drivers"]["id"] == f"binding-{report.id}-drivers"
+    assert bindings_by_source["drivers"]["kind"] == "materialized_result"
