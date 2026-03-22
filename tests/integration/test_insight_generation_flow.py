@@ -2,7 +2,9 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
+from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
+from app.infra.repositories.report_intent_repo import ReportIntentRepository
 from app.main import app
 from app.services.audit_log import _AUDIT_EVENTS
 from app.services.insight_monitor import run_monitor_once
@@ -64,12 +66,79 @@ def test_monitor_generates_card_and_default_report_snapshot(tmp_path, monkeypatc
     assert cards[0]["report_id"]
     assert cards[0]["dashboard_id"]
 
+    generated_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATED")
+    permission_context = generated_event["result_summary"]["permission_context"]
+    assert permission_context["principal_id"] == "u-1"
+    assert permission_context["role_scope"] == ["region:华东", "region:华南"]
+    assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+
+    stored_report = DiagnosticReportRepository().get_for_owner(
+        report_id=cards[0]["report_id"],
+        tenant_id="t-1",
+        principal_id="u-1",
+    )
+    stored_intent = ReportIntentRepository().get_for_owner(
+        intent_id=stored_report["report_intent_id"],
+        tenant_id="t-1",
+        principal_id="u-1",
+    )
+    assert stored_intent["trace"]["trace_id"] == cards[0]["trace_id"]
+    assert stored_intent["question"] == cards[0]["suggested_next_question"]
+
     report = client.get(
         f"/v1/reports/{cards[0]['report_id']}",
         params={"tenant_id": "t-1", "user_id": "u-1", "principal_id": "u-1"},
     )
     assert report.status_code == 200
     assert any(event["status"] == "DIAGNOSTIC_REPORT_GENERATED" for event in _AUDIT_EVENTS)
+
+
+def test_monitor_repeated_runs_keep_linked_snapshots_unique(tmp_path, monkeypatch):
+    db_path = tmp_path / "monitor-report-repeat.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    _AUDIT_EVENTS.clear()
+
+    first_count = run_monitor_once(
+        snapshots=[
+            {"metric": "gross_margin_rate", "scope": {"region": "华东"}, "current_value": 0.24, "baseline_value": 0.30}
+        ],
+        abs_thresholds={"gross_margin_rate": 0.26},
+        delta_thresholds={"gross_margin_rate": 0.04},
+    )
+    second_count = run_monitor_once(
+        snapshots=[
+            {"metric": "gross_margin_rate", "scope": {"region": "华东"}, "current_value": 0.24, "baseline_value": 0.30}
+        ],
+        abs_thresholds={"gross_margin_rate": 0.26},
+        delta_thresholds={"gross_margin_rate": 0.04},
+    )
+
+    assert first_count == 1
+    assert second_count == 1
+
+    cards = InsightRepository().list_by_regions(["华东"])
+    assert len(cards) == 2
+    assert all(card["report_id"] for card in cards)
+    assert all(card["dashboard_id"] for card in cards)
+    assert len({card["dashboard_id"] for card in cards}) == 2
+    assert len({card["trace_id"] for card in cards}) == 2
+
+    reports = DiagnosticReportRepository()
+    intents = ReportIntentRepository()
+    for card in cards:
+        stored_report = reports.get_for_owner(
+            report_id=card["report_id"],
+            tenant_id="t-1",
+            principal_id="u-1",
+        )
+        stored_intent = intents.get_for_owner(
+            intent_id=stored_report["report_intent_id"],
+            tenant_id="t-1",
+            principal_id="u-1",
+        )
+        assert stored_intent["trace"]["trace_id"] == card["trace_id"]
+
+    assert not any(event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED" for event in _AUDIT_EVENTS)
 
 
 def test_monitor_keeps_card_when_report_generation_fails(tmp_path, monkeypatch):
@@ -93,4 +162,9 @@ def test_monitor_keeps_card_when_report_generation_fails(tmp_path, monkeypatch):
     assert count == 1
     cards = InsightRepository().list_by_regions(["华东"])
     assert cards[0]["report_id"] is None
-    assert any(event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED" for event in _AUDIT_EVENTS)
+    failed_event = next(event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED")
+    permission_context = failed_event["result_summary"]["permission_context"]
+    assert permission_context["principal_id"] == "u-1"
+    assert permission_context["role_scope"] == ["region:华东", "region:华南"]
+    assert permission_context["row_level_policy_ref"] == "sales-region:u-1"
+    assert failed_event["error_code"] == "DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED"

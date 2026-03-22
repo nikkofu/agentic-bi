@@ -2,8 +2,10 @@ from app.api.reporting import build_permission_context
 from app.infra.repositories.dashboard_repo import DashboardRepository
 from app.infra.repositories.diagnostic_report_repo import DiagnosticReportRepository
 from app.infra.repositories.insight_repo import InsightRepository
+from app.infra.repositories.report_intent_repo import ReportIntentRepository
 from app.services.access_policy import resolve_allowed_regions
 from app.services.audit_log import append_audit_event
+from app.services.audit_log import new_trace_id
 from app.services.diagnostic_dashboard_assembler import assemble_diagnostic_dashboard
 from app.services.diagnostic_report_builder import build_diagnostic_report
 from app.services.insight_attribution import compute_single_layer_attribution
@@ -11,13 +13,48 @@ from app.services.insight_cards import build_insight_card
 from app.services.insight_rules import evaluate_anomaly
 from app.services.report_intent_builder import build_report_intent
 
+DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED = "DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED"
 
-def _build_monitor_report_intent(*, tenant_id: str, principal_id: str, card: dict, event) -> object:
-    permission_context = build_permission_context(
+
+def _build_monitor_permission_context(*, tenant_id: str, principal_id: str) -> dict:
+    return build_permission_context(
         principal_id=principal_id,
         role_scope=[f"region:{region}" for region in resolve_allowed_regions(user_id=principal_id, tenant_id=tenant_id)],
         row_level_policy_ref=f"sales-region:{principal_id}",
     )
+
+
+def _append_monitor_report_audit_event(
+    *,
+    trace_id: str,
+    status: str,
+    tenant_id: str,
+    principal_id: str,
+    question: str,
+    error_code: str | None = None,
+    result_summary: dict | None = None,
+) -> None:
+    permission_context = _build_monitor_permission_context(tenant_id=tenant_id, principal_id=principal_id)
+    summary = dict(result_summary or {})
+    summary["permission_context"] = {
+        "principal_id": permission_context["principal_id"],
+        "role_scope": permission_context["role_scope"],
+        "row_level_policy_ref": permission_context["row_level_policy_ref"],
+    }
+    append_audit_event(
+        {
+            "trace_id": trace_id,
+            "status": status,
+            "question": question,
+            "conversation_id": "",
+            "error_code": error_code,
+            "result_summary": summary,
+        }
+    )
+
+
+def _build_monitor_report_intent(*, tenant_id: str, principal_id: str, card: dict, event) -> object:
+    permission_context = _build_monitor_permission_context(tenant_id=tenant_id, principal_id=principal_id)
     return build_report_intent(
         question=card["suggested_next_question"],
         tenant_id=tenant_id,
@@ -44,17 +81,19 @@ def _create_default_report_snapshot(
 ) -> dict:
     trace_id = card["trace_id"]
     dashboard_id = f"dash-{trace_id}"
+    report_intent = _build_monitor_report_intent(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        card=card,
+        event=event,
+    )
+    ReportIntentRepository().save(report_intent)
     report = build_diagnostic_report(
         tenant_id=tenant_id,
         principal_id=principal_id,
         source_kind="insight_card",
         source_ref=card["card_id"],
-        report_intent=_build_monitor_report_intent(
-            tenant_id=tenant_id,
-            principal_id=principal_id,
-            card=card,
-            event=event,
-        ),
+        report_intent=report_intent,
         metric_result={"metric": card["metric"], "time_window": "last_month"},
         finding_inputs=[
             {
@@ -116,7 +155,7 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
             [{"region": snap["scope"].get("region", "全域"), "value": event.delta}],
             dimension="region",
         )
-        card_payload = build_insight_card(event=event, attribution=attribution, trace_id=f"insight-{generated + 1}")
+        card_payload = build_insight_card(event=event, attribution=attribution, trace_id=new_trace_id())
         card = repo.save_card(card_payload)
 
         try:
@@ -132,16 +171,15 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
                     attribution=attribution,
                 ),
             )
-        except Exception as exc:
-            append_audit_event(
-                {
-                    "trace_id": card["trace_id"],
-                    "status": "DIAGNOSTIC_REPORT_GENERATE_FAILED",
-                    "question": card["suggested_next_question"],
-                    "conversation_id": "",
-                    "error_code": str(exc),
-                    "result_summary": {"card_id": card["card_id"]},
-                }
+        except Exception:
+            _append_monitor_report_audit_event(
+                trace_id=card["trace_id"],
+                status="DIAGNOSTIC_REPORT_GENERATE_FAILED",
+                tenant_id="t-1",
+                principal_id="u-1",
+                question=card["suggested_next_question"],
+                error_code=DEFAULT_REPORT_SNAPSHOT_CREATE_FAILED,
+                result_summary={"card_id": card["card_id"]},
             )
             generated += 1
             continue
@@ -151,18 +189,17 @@ def run_monitor_once(*, snapshots: list[dict], abs_thresholds: dict, delta_thres
             report_id=report_snapshot["id"],
             dashboard_id=report_snapshot["dashboard_id"],
         )
-        append_audit_event(
-            {
-                "trace_id": card["trace_id"],
-                "status": "DIAGNOSTIC_REPORT_GENERATED",
-                "question": card["suggested_next_question"],
-                "conversation_id": "",
-                "result_summary": {
-                    "card_id": card["card_id"],
-                    "report_id": report_snapshot["id"],
-                    "dashboard_id": report_snapshot["dashboard_id"],
-                },
-            }
+        _append_monitor_report_audit_event(
+            trace_id=card["trace_id"],
+            status="DIAGNOSTIC_REPORT_GENERATED",
+            tenant_id="t-1",
+            principal_id="u-1",
+            question=card["suggested_next_question"],
+            result_summary={
+                "card_id": card["card_id"],
+                "report_id": report_snapshot["id"],
+                "dashboard_id": report_snapshot["dashboard_id"],
+            },
         )
         generated += 1
 
