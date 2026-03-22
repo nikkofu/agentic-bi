@@ -105,17 +105,22 @@
 ### 4.1 统一报告内核
 
 系统新增统一的 `diagnostic_report_builder` / `diagnostic_dashboard_assembler` 内核，分别负责：
-- 构建诊断报告的语义上下文、摘要、结论、建议
+- 基于现有 `ReportIntent` 构建诊断报告的语义上下文、摘要、结论、建议
 - 将诊断素材组装成多页 `DashboardSpec`
 
 两类入口都走这一内核：
 - `insight card -> report`
 - `direct generate -> report`
 
-### 4.2 报告仍是受控的 `DashboardSpec`
+### 4.2 `DiagnosticReport` 是诊断元信息真源，`DashboardSpec` 仅负责渲染
 
-诊断报告本体不新建渲染协议，而是定义为一类带有 diagnostic metadata 的 `DashboardSpec`：
-- `report_kind = diagnostic`
+诊断报告本体不新建渲染协议，但也不把诊断语义元信息塞进 `DashboardSpec`。
+
+本设计明确采用：
+- `DiagnosticReport` 负责诊断元信息、治理语义、入口语义、快照语义
+- `DashboardSpec` 仅负责运行时多页面展示
+
+以下字段全部归属于 `DiagnosticReport`，不进入 `DashboardSpec`：
 - `source_kind = insight_card | on_demand`
 - `source_ref`
 - `snapshot_time`
@@ -125,11 +130,12 @@
 这样做的结果是：
 - viewer 不必重写
 - dashboard persistence 可继续复用
-- 报告与普通 auto-reporting dashboard 可以共享协议底座
+- reporting protocol 不会被诊断场景污染
+- report metadata 与 dashboard rendering 可以分别演进
 
 ### 4.3 多页面 viewer
 
-viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，但仍使用现有 widget renderer。
+现有 viewer 已经支持渲染 `DashboardSpec.pages`，但当前表现是“平铺 pages”。本阶段将它升级为“应用内多页面导航”，仍继续使用现有 widget renderer。
 
 报告 v1 固定三页：
 - `Overview`
@@ -197,7 +203,12 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 - `DashboardSection`
 - `DashboardWidget`
 
-但需要在 `DashboardSpec` 层容纳少量 metadata，或者在 `DiagnosticReport` 中持有相关摘要并与 `dashboard_id` 关联。
+其中边界明确为：
+- `ReportIntent` 继续承载语义查询与解释来源
+- `DiagnosticReport` 承载诊断语义元信息与快照元信息
+- `DashboardSpec` 只承载可渲染页面结构
+
+本阶段不引入新的 `DiagnosticReportIntent` 类型，统一复用现有 `ReportIntent`。
 
 ### 5.3 快照关系模型
 
@@ -207,6 +218,7 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 
 说明：
 - 一个 insight card 在本阶段只绑定一份默认报告快照
+- 基于已有 insight card 的报告生成与读取是幂等的，默认返回该 card 已绑定的默认报告快照
 - 一个 direct generate 请求会生成新的 `diagnostic_report`
 - 每个 `diagnostic_report` 绑定一份持久化 dashboard snapshot
 - 默认不覆盖旧报告，不做“就地刷新”
@@ -264,10 +276,54 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 - 基于已有 insight/anomaly 上下文
 - 基于显式 metric/scope/time_window 的 direct generate
 
+最小请求 contract：
+
+```json
+{
+  "tenant_id": "t-1",
+  "user_id": "u-1",
+  "principal_id": "u-1",
+  "mode": "from_insight | direct",
+  "insight_card_id": "card-1",
+  "metric": "gross_margin_rate",
+  "scope": {"region": "华东"},
+  "time_window": "last_month"
+}
+```
+
+规则：
+- `mode = from_insight` 时，`insight_card_id` 必填，接口默认返回该 card 已绑定的默认报告快照
+- `mode = direct` 时，`metric/scope/time_window` 等 direct 参数必填，接口创建新的报告快照
+- 本阶段不支持通过 `from_insight` 强制刷新或重建报告
+
+`GET /v1/reports/{report_id}` 是诊断报告的规范读取入口。
+
+最小响应 contract：
+
+```json
+{
+  "report": {
+    "id": "dr-1",
+    "source_kind": "insight_card",
+    "source_ref": "card-1",
+    "snapshot_time": "2026-03-22T10:00:00Z",
+    "summary": {},
+    "findings": [],
+    "recommendations": [],
+    "dashboard_id": "dash-1",
+    "report_intent_id": "ri-1",
+    "trace": {}
+  },
+  "dashboard": {
+    "id": "dash-1",
+    "version": "1.0",
+    "pages": []
+  }
+}
+```
+
 返回内容建议至少包括：
-- `report_id`
-- `dashboard_id`
-- `report_summary`
+- `report`
 - `dashboard`
 
 ### 7.3 Viewer 路由
@@ -277,8 +333,9 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 - `/dashboards/:dashboardId`
 
 其中：
-- `/reports/:reportId` 用于 report 详情与治理语义入口
-- `/dashboards/:dashboardId` 继续作为统一渲染入口
+- `/reports/:reportId` 是诊断报告的主入口，用于 report 详情与治理语义入口
+- `/dashboards/:dashboardId` 继续保留，作为底层 dashboard 查看入口与兼容入口
+- insight card 的 `detail_url` 默认指向 `/reports/:reportId`
 
 ---
 
@@ -288,7 +345,7 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 1. 监控任务检测到 anomaly
 2. 生成 anomaly event
 3. 生成 insight card
-4. 同步构建 `DiagnosticReportIntent`
+4. 基于现有 `ReportIntent` 构建诊断报告上下文
 5. 执行受控查询，收集趋势、比较、归因等诊断素材
 6. 组装多页 `DashboardSpec`
 7. 持久化 `diagnostic_report + dashboard snapshot`
@@ -297,7 +354,7 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 
 ### 8.2 Direct Generate 入口
 1. 收到 `POST /v1/reports:generate`
-2. 构建 `DiagnosticReportIntent`
+2. 基于 direct generate 参数构建 `ReportIntent`
 3. 执行受控查询
 4. 组装报告 dashboard
 5. 持久化报告快照
@@ -306,8 +363,8 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 ### 8.3 读取流程
 1. 用户从 insight card 或直接链接进入
 2. 后端基于 `report_id` 做权限检查
-3. 返回 report metadata
-4. viewer 通过 `dashboard_id` 或直接嵌入 dashboard payload 渲染
+3. 返回 `report + embedded dashboard`
+4. viewer 以 `report_id` 为主路由直接渲染
 
 ---
 
@@ -357,7 +414,7 @@ viewer 从当前的“平铺 pages”升级为“应用内多页面导航”，�
 - card detail 中可提示报告暂不可用
 
 ### 10.3 Viewer 回退
-- 若 report metadata 可读但 dashboard 缺失，返回明确错误态
+- 若 report metadata 可读但 embedded dashboard 缺失，返回明确错误态
 - 若 dashboard 存在但 metadata 缺失，视为数据完整性问题并阻断展示
 
 ---
