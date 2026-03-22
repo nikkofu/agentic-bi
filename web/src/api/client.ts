@@ -1,4 +1,4 @@
-import type { DashboardDocument, ReportIntent, ReportPreviewPayload } from "../types/reporting";
+import type { DashboardDocument, DiagnosticReportDocument, ReportIntent, ReportPreviewPayload } from "../types/reporting";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const DEFAULT_VIEWER_CONTEXT = {
@@ -53,4 +53,9 @@ export async function fetchPreview(question: string): Promise<ReportPreviewPaylo
 export async function fetchDashboard(dashboardId: string): Promise<DashboardDocument> {
   const params = new URLSearchParams(DEFAULT_VIEWER_CONTEXT);
   return fetchJson<DashboardDocument>(`${API_BASE_URL}/v1/dashboards/${dashboardId}?${params.toString()}`);
+}
+
+export async function fetchReport(reportId: string): Promise<DiagnosticReportDocument> {
+  const params = new URLSearchParams(DEFAULT_VIEWER_CONTEXT);
+  return fetchJson<DiagnosticReportDocument>(`${API_BASE_URL}/v1/reports/${reportId}?${params.toString()}`);
 }

@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { getRowsForWidget, buildEChartsOption } from "../../renderers/echartsAdapter";
 import { DashboardPage } from "../DashboardPage";
+import { diagnosticReportFixture } from "../../test/fixtures/diagnosticReport";
 import { reportPreviewFixture } from "../../test/fixtures/reportPreview";
 
 it("renders dashboard title and top-level widgets", () => {
@@ -54,4 +55,25 @@ it("renders chart widgets from bound rows", () => {
 
   expect(option.xAxis.type).toBe("category");
   expect(screen.getByTestId("chart-widget")).toBeInTheDocument();
+});
+
+it("shows only the active dashboard page and switches pages from the nav", async () => {
+  render(<DashboardPage dashboard={diagnosticReportFixture.dashboard} />);
+
+  const overviewTab = screen.getByRole("tab", { name: "Overview" });
+  const actionsTab = screen.getByRole("tab", { name: "Actions" });
+
+  expect(overviewTab).toHaveAttribute("aria-selected", "true");
+  expect(actionsTab).toHaveAttribute("aria-selected", "false");
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "dashboard-tab-page-overview");
+  expect(screen.getByText("Overview KPI")).toBeInTheDocument();
+  expect(screen.queryByText("Action Plan")).not.toBeInTheDocument();
+
+  fireEvent.click(actionsTab);
+
+  expect(actionsTab).toHaveAttribute("aria-selected", "true");
+  expect(overviewTab).toHaveAttribute("aria-selected", "false");
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "dashboard-tab-page-actions");
+  expect(screen.getByText("Action Plan")).toBeInTheDocument();
+  expect(screen.queryByText("Overview KPI")).not.toBeInTheDocument();
 });

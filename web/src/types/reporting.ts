@@ -111,3 +111,49 @@ export interface DashboardDocument {
   dashboard: DashboardSpec;
   report_intent: ReportIntent;
 }
+
+export interface DiagnosticReportSummary {
+  title: string;
+  subtitle?: string | null;
+  metric: string;
+  scope: Record<string, JsonValue>;
+  time_window: string;
+  severity?: string | null;
+  headline?: string | null;
+}
+
+export interface DiagnosticFinding {
+  kind: string;
+  title: string;
+  statement: string;
+  evidence_refs: string[];
+}
+
+export interface DiagnosticRecommendation {
+  kind: string;
+  label: string;
+  question?: string | null;
+  rationale?: string | null;
+}
+
+export interface DiagnosticReport {
+  id: string;
+  version: string;
+  tenant_id: string;
+  principal_id: string;
+  source_kind: string;
+  source_ref: string;
+  snapshot_time: string;
+  status: string;
+  summary: DiagnosticReportSummary;
+  findings: DiagnosticFinding[];
+  recommendations: DiagnosticRecommendation[];
+  dashboard_id: string;
+  report_intent_id: string;
+  trace: Record<string, JsonValue>;
+}
+
+export interface DiagnosticReportDocument {
+  report: DiagnosticReport;
+  dashboard: DashboardSpec;
+}
