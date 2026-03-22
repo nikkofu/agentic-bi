@@ -19,14 +19,35 @@ def _scope_from_intent(report_intent) -> dict[str, str]:
     return {}
 
 
+_SEVERITY_PRIORITY = {
+    "critical": 0,
+    "p1": 0,
+    "high": 1,
+    "p2": 1,
+    "medium": 2,
+    "p3": 2,
+    "low": 3,
+}
+
+_DEFAULT_SEVERITY_PRIORITY = max(_SEVERITY_PRIORITY.values()) + 1
+
+
 def _severity_from_findings(findings: list[dict]) -> str:
-    if not findings:
-        return "medium"
-    for item in findings:
-        severity = item.get("severity")
-        if severity:
-            return str(severity)
-    return "medium"
+    best_severity = "medium"
+    best_priority = _DEFAULT_SEVERITY_PRIORITY
+    for finding in findings:
+        raw = finding.get("severity")
+        if not raw:
+            continue
+        value = str(raw).strip()
+        if not value:
+            continue
+        key = value.lower()
+        priority = _SEVERITY_PRIORITY.get(key, _DEFAULT_SEVERITY_PRIORITY)
+        if priority < best_priority:
+            best_priority = priority
+            best_severity = value
+    return best_severity
 
 
 def _sanitize_finding_inputs(findings: list[dict]) -> list[dict]:
