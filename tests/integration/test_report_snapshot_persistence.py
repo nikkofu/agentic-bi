@@ -103,7 +103,8 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
 
     def create_fn():
         calls["count"] += 1
-        return build_report_payload(report_id=f"dr-create-{calls['count']}", dashboard_id="dash-default")
+        created = build_report_payload(report_id=f"dr-create-{calls['count']}", dashboard_id="dash-default")
+        return reports.save(created)
 
     first = reports.get_or_create_default_for_insight(
         tenant_id="t-1",
@@ -124,6 +125,32 @@ def test_report_repo_get_or_create_default_for_insight_is_idempotent(tmp_path, m
     with sqlite3.connect(db_path) as connection:
         total_rows = connection.execute("SELECT COUNT(*) FROM diagnostic_reports").fetchone()[0]
     assert total_rows == 1
+
+
+def test_insight_repo_generates_unique_card_ids_when_missing(tmp_path, monkeypatch):
+    db_path = tmp_path / "insight-card-id-fallback.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    repo = InsightRepository()
+    payload = {
+        "trace_id": "trace-same",
+        "metric": "gross_margin_rate",
+        "scope": {"region": "华东"},
+        "severity": "P1",
+        "summary": "summary",
+        "attribution": {"key": "华东", "contribution": -0.06},
+        "suggested_next_question": "next",
+    }
+
+    first = repo.save_card(payload)
+    second = repo.save_card(payload)
+
+    assert first["card_id"].startswith("card-")
+    assert second["card_id"].startswith("card-")
+    assert first["card_id"] != second["card_id"]
+
+    with sqlite3.connect(db_path) as connection:
+        total_rows = connection.execute("SELECT COUNT(*) FROM insight_cards").fetchone()[0]
+    assert total_rows == 2
 
 
 def test_dashboard_repo_generates_fresh_ids_without_explicit_dashboard_id(tmp_path, monkeypatch):

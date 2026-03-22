@@ -1,5 +1,5 @@
 import json
-from hashlib import sha1
+from uuid import uuid4
 
 from sqlalchemy import Column, Integer, MetaData, String, Table, Text, insert, select, update
 
@@ -31,7 +31,7 @@ class InsightRepository:
         metadata.create_all(self.engine)
 
     def save_card(self, card: dict) -> dict:
-        card_id = card.get("card_id") or self._fallback_card_id(card)
+        card_id = card.get("card_id") or self._fallback_card_id()
         report_id = card.get("report_id")
         dashboard_id = card.get("dashboard_id")
         detail_url = self._build_detail_url(report_id=report_id)
@@ -130,21 +130,8 @@ class InsightRepository:
             raise KeyError(card_id)
 
     @staticmethod
-    def _fallback_card_id(card: dict) -> str:
-        fingerprint = sha1(
-            json.dumps(
-                {
-                    "trace_id": card.get("trace_id", ""),
-                    "metric": card.get("metric", ""),
-                    "scope": card.get("scope", {}),
-                    "severity": card.get("severity", ""),
-                    "summary": card.get("summary", ""),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ).encode("utf-8")
-        ).hexdigest()
-        return f"card-{fingerprint[:12]}"
+    def _fallback_card_id() -> str:
+        return f"card-{uuid4().hex[:12]}"
 
     @staticmethod
     def _build_detail_url(*, report_id: str | None) -> str | None:

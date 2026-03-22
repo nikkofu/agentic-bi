@@ -103,11 +103,4 @@ class DiagnosticReportRepository:
         if existing is not None:
             return existing
 
-        payload = create_fn()
-        payload = payload.model_dump(mode="python") if hasattr(payload, "model_dump") else dict(payload)
-        payload["tenant_id"] = tenant_id
-        payload["principal_id"] = principal_id
-        payload["source_kind"] = source_kind
-        payload["source_ref"] = source_ref
-
-        return self.save(payload)
+        return create_fn()
