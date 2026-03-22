@@ -46,23 +46,24 @@ class DashboardRepository:
         principal_id: str,
         report_intent_id: str,
         dashboard: dict,
+        dashboard_id: str | None = None,
     ) -> dict:
-        dashboard_id = f"dash-{uuid4().hex[:12]}"
+        resolved_dashboard_id = dashboard_id or dashboard.get("id") or f"dash-{uuid4().hex[:12]}"
         revision_id = f"rev-{uuid4().hex[:12]}"
         persisted_dashboard = dict(dashboard)
-        persisted_dashboard["id"] = dashboard_id
+        persisted_dashboard["id"] = resolved_dashboard_id
 
         with self.engine.begin() as connection:
             connection.execute(
                 insert(dashboard_revisions).values(
                     revision_id=revision_id,
-                    dashboard_id=dashboard_id,
+                    dashboard_id=resolved_dashboard_id,
                     spec_json=json.dumps(persisted_dashboard, ensure_ascii=False),
                 )
             )
             connection.execute(
                 insert(dashboards).values(
-                    dashboard_id=dashboard_id,
+                    dashboard_id=resolved_dashboard_id,
                     tenant_id=tenant_id,
                     principal_id=principal_id,
                     title=persisted_dashboard.get("title", "Untitled Dashboard"),
@@ -73,7 +74,7 @@ class DashboardRepository:
             )
 
         return {
-            "dashboard_id": dashboard_id,
+            "dashboard_id": resolved_dashboard_id,
             "report_intent_id": report_intent_id,
             "current_revision_id": revision_id,
             "published_revision_id": revision_id,
