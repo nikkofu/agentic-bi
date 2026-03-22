@@ -6,6 +6,15 @@ const DEFAULT_VIEWER_CONTEXT = {
   user_id: "u-1",
   principal_id: "u-1",
 };
+export type ViewerContext = typeof DEFAULT_VIEWER_CONTEXT;
+
+export function resolveViewerContext(overrides?: Partial<ViewerContext>): ViewerContext {
+  return {
+    tenant_id: overrides?.tenant_id ?? DEFAULT_VIEWER_CONTEXT.tenant_id,
+    user_id: overrides?.user_id ?? DEFAULT_VIEWER_CONTEXT.user_id,
+    principal_id: overrides?.principal_id ?? DEFAULT_VIEWER_CONTEXT.principal_id,
+  };
+}
 
 async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -50,12 +59,22 @@ export async function fetchPreview(question: string): Promise<ReportPreviewPaylo
   });
 }
 
-export async function fetchDashboard(dashboardId: string): Promise<DashboardDocument> {
-  const params = new URLSearchParams(DEFAULT_VIEWER_CONTEXT);
+export async function fetchDashboardForViewer(
+  dashboardId: string,
+  viewerContext: ViewerContext = DEFAULT_VIEWER_CONTEXT,
+): Promise<DashboardDocument> {
+  const params = new URLSearchParams(viewerContext);
   return fetchJson<DashboardDocument>(`${API_BASE_URL}/v1/dashboards/${dashboardId}?${params.toString()}`);
 }
 
-export async function fetchReport(reportId: string): Promise<DiagnosticReportDocument> {
-  const params = new URLSearchParams(DEFAULT_VIEWER_CONTEXT);
+export async function fetchReport(
+  reportId: string,
+  viewerContext: ViewerContext = DEFAULT_VIEWER_CONTEXT,
+): Promise<DiagnosticReportDocument> {
+  const params = new URLSearchParams(viewerContext);
   return fetchJson<DiagnosticReportDocument>(`${API_BASE_URL}/v1/reports/${reportId}?${params.toString()}`);
+}
+
+export async function fetchDashboard(dashboardId: string): Promise<DashboardDocument> {
+  return fetchDashboardForViewer(dashboardId, DEFAULT_VIEWER_CONTEXT);
 }

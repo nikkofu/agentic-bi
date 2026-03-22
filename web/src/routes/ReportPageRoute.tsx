@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { fetchReport } from "../api/client";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { fetchReport, resolveViewerContext } from "../api/client";
 import { DashboardPage } from "../components/DashboardPage";
 import type { DiagnosticReportDocument } from "../types/reporting";
 
@@ -26,9 +26,22 @@ function RouteStatus({
 
 export function ReportPageRoute() {
   const { reportId = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const [document, setDocument] = useState<DiagnosticReportDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const tenantId = searchParams.get("tenant_id") ?? undefined;
+  const userId = searchParams.get("user_id") ?? undefined;
+  const principalId = searchParams.get("principal_id") ?? undefined;
+  const viewerContext = useMemo(
+    () =>
+      resolveViewerContext({
+        tenant_id: tenantId,
+        user_id: userId,
+        principal_id: principalId,
+      }),
+    [tenantId, userId, principalId],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -45,7 +58,7 @@ export function ReportPageRoute() {
     setIsLoading(true);
     setError(null);
 
-    void fetchReport(reportId)
+    void fetchReport(reportId, viewerContext)
       .then((payload) => {
         if (!isActive) {
           return;
@@ -65,7 +78,7 @@ export function ReportPageRoute() {
     return () => {
       isActive = false;
     };
-  }, [reportId]);
+  }, [reportId, viewerContext]);
 
   if (isLoading) {
     return (

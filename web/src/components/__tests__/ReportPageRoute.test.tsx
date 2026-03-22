@@ -30,3 +30,20 @@ it("loads a diagnostic report from the canonical report route", async () => {
   expect(screen.getByText(diagnosticReportFixture.report.summary.title)).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Drivers" })).toBeInTheDocument();
 });
+
+it("passes viewer identity from report route query params", async () => {
+  const fetchMock = vi.fn().mockImplementationOnce(() => mockJsonResponse(diagnosticReportFixture));
+  global.fetch = fetchMock;
+
+  render(
+    <MemoryRouter initialEntries={["/reports/dr-1?tenant_id=t-1&user_id=u-south&principal_id=u-south"]}>
+      <App />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(screen.getByText("Diagnostic Report")).toBeInTheDocument());
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/v1/reports/dr-1?tenant_id=t-1&user_id=u-south&principal_id=u-south"),
+    undefined,
+  );
+});
