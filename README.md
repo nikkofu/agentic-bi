@@ -2,7 +2,7 @@
 
 Agentic BI is a decision-intelligence product prototype that upgrades traditional ChatBI from passive query/visualization into an active, governable business copilot.
 
-Current focus is **Phase 1 (Sales Copilot)** plus the first **Auto Reporting Phase 1** slice: high-accuracy, traceable, RBAC-safe natural-language metric Q&A in the sales domain, with a read-only report protocol and viewer on top.
+Current focus is **Phase 1 (Sales Copilot)** plus the first **Phase 2 proactive diagnostic-report** slice: high-accuracy, traceable, RBAC-safe natural-language metric Q&A in the sales domain, extended with proactive insight cards, default diagnostic report snapshots, and a canonical read-only report viewer.
 
 ## Why this project
 
@@ -63,6 +63,9 @@ The backend now exposes these reporting endpoints in addition to the existing ch
 - `POST /v1/dashboards:assemble`
 - `POST /v1/dashboards`
 - `GET /v1/dashboards/{dashboard_id}`
+- `POST /v1/reports:generate`
+- `GET /v1/reports/{report_id}`
+- `GET /v1/insights/cards/{card_id}`
 
 For local viewer development, CORS defaults allow:
 
@@ -84,7 +87,8 @@ VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --port 5
 Viewer routes:
 
 - `/preview?question=上个月华东区毛利率是多少？`
-- `/dashboards/:dashboardId`
+- `/reports/:reportId`
+- `/dashboards/:dashboardId` (lower-level compatibility route for direct dashboard viewing)
 
 ## Test & build
 
@@ -99,8 +103,10 @@ cd web && npm run build
 - RFP: `docs/RFP.md`
 - Base sales-copilot design: `docs/superpowers/specs/2026-03-20-phase1-sales-copilot-design.md`
 - Auto-reporting design: `docs/superpowers/specs/2026-03-21-agentic-bi-auto-reporting-protocol-design.md`
+- Proactive diagnostic-report design: `docs/superpowers/specs/2026-03-22-proactive-diagnostic-report-design.md`
 - Base sales-copilot implementation plan: `docs/superpowers/plans/2026-03-20-phase1-sales-copilot.md`
 - Auto-reporting implementation plan: `docs/superpowers/plans/2026-03-21-auto-reporting-phase1.md`
+- Proactive diagnostic-report implementation plan: `docs/superpowers/plans/2026-03-22-proactive-diagnostic-report.md`
 - Extra MVP scenario spec: `docs/superpowers/specs/2026-03-20-agentic-bi-sales-pricing-design.md`
 - Project status: `docs/PROJECT-STATUS.md`
 

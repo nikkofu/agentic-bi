@@ -1,13 +1,13 @@
 # Project Status
 
-_Last updated: 2026-03-22_
+_Last updated: 2026-03-23_
 
 ## Current stage
 
 - **Requirements:** complete (`docs/RFP.md`)
-- **Design:** complete and approved for base sales-copilot plus Auto Reporting Phase 1
-- **Implementation plan:** complete (`docs/superpowers/plans/2026-03-20-phase1-sales-copilot.md`, `docs/superpowers/plans/2026-03-21-auto-reporting-phase1.md`)
-- **Code implementation:** complete for the current Auto Reporting Phase 1 plan on `feature/phase1-sales-copilot`, pending final integration decision
+- **Design:** complete and approved for base sales-copilot, Auto Reporting Phase 1, and the first proactive diagnostic-report slice on `main`
+- **Implementation plan:** complete (`docs/superpowers/plans/2026-03-20-phase1-sales-copilot.md`, `docs/superpowers/plans/2026-03-21-auto-reporting-phase1.md`, `docs/superpowers/plans/2026-03-22-proactive-diagnostic-report.md`)
+- **Code implementation:** mainline implementation is active on `main`, with the approved proactive diagnostic-report plan now in progress and advancing through reviewed tasks
 
 ## What is done
 
@@ -36,23 +36,26 @@ _Last updated: 2026-03-22_
 23. `/v1/chat/query` remains backward compatible while attaching report preview payloads for the new reporting flow
 24. Read-only web viewer implemented with `/preview` and `/dashboards/:dashboardId` routes plus ECharts rendering for `metric_card`, `chart`, `insight`, and `text` widgets
 25. End-to-end verification for the current plan now passes across backend tests, frontend tests, and frontend production build
+26. Proactive diagnostic-report design and implementation plan are approved and landed as canonical documents on `main`
+27. Mainline implementation now includes proactive insight-card persistence, default diagnostic report generation/fetch APIs, canonical `/reports/:reportId` viewer routing, and linked multi-page report navigation
 
 ## What is next
 
-1. Run final review / integration decision for `feature/phase1-sales-copilot`
-2. Merge `feature/phase1-sales-copilot` back to `main` when approved
-3. Start the next phase only after this branch is closed out cleanly
+1. Continue implementing the approved proactive diagnostic-report plan on `main`, task by task, with tests and verification for each slice
+2. Complete the remaining proactive-report work needed to round out the current stage's report generation, viewer, and docs flows
+3. Keep later-stage capabilities isolated until a new approved spec/plan covers them explicitly
 
 ## Out-of-scope now
 
-- Proactive anomaly detection (Phase 2)
+- Broader Phase 2 proactive anomaly detection and diagnosis beyond the current first diagnostic-report slice
 - Cross-system action orchestration and approval execution flows (Phase 3)
 - Multi-domain expansion beyond sales
 - Full dashboard editor, drag-and-drop layout editing, and editor-state APIs
+- Report export, share links, and refresh/regenerate flows for saved diagnostic reports
 
 ## Success criteria for this stage
 
 - Canonical plan remains the source of truth for implementation
 - Each implementation task includes tests and verification before merge
-- Feature branch remains mergeable into `main` without losing project documentation baselines
+- Mainline status and canonical docs stay aligned as proactive diagnostic-report work advances on `main`
 - Auto Reporting Phase 1 remains read-only and governed, with protocol/viewer work separated from future editor capabilities
