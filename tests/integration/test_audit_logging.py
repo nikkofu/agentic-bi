@@ -582,12 +582,17 @@ def test_insight_endpoints_audit_lazy_report_generation_failures(tmp_path, monke
 
     list_resp = client.get("/v1/insights/cards", params={"tenant_id": "t-1", "user_id": "u-1"})
     assert list_resp.status_code == 200
+    listed_card = next(item for item in list_resp.json()["items"] if item["card_id"] == seeded_card["card_id"])
+    assert listed_card["report_status"] == "unavailable"
+    assert listed_card["report_error_code"] == reports_api.DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
 
     detail_resp = client.get(
         f"/v1/insights/cards/{seeded_card['card_id']}",
         params={"tenant_id": "t-1", "user_id": "u-1"},
     )
     assert detail_resp.status_code == 200
+    assert detail_resp.json()["card"]["report_status"] == "unavailable"
+    assert detail_resp.json()["card"]["report_error_code"] == reports_api.DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
 
     failed_events = [event for event in _AUDIT_EVENTS if event["status"] == "DIAGNOSTIC_REPORT_GENERATE_FAILED"]
     assert len(failed_events) == 2

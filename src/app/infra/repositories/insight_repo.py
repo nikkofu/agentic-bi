@@ -65,6 +65,8 @@ class InsightRepository:
             "report_id": report_id,
             "dashboard_id": dashboard_id,
             "detail_url": detail_url,
+            "report_status": None,
+            "report_error_code": None,
         }
 
     def list_by_regions(self, allowed_regions: list[str]) -> list[dict]:
@@ -89,6 +91,8 @@ class InsightRepository:
                     "report_id": row["report_id"],
                     "dashboard_id": row["dashboard_id"],
                     "detail_url": row["detail_url"],
+                    "report_status": None,
+                    "report_error_code": None,
                 }
             )
         return cards
@@ -116,6 +120,8 @@ class InsightRepository:
             "report_id": row["report_id"],
             "dashboard_id": row["dashboard_id"],
             "detail_url": row["detail_url"],
+            "report_status": None,
+            "report_error_code": None,
         }
 
     def attach_report(self, card_id: str, report_id: str, dashboard_id: str) -> None:

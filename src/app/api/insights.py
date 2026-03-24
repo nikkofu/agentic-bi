@@ -50,6 +50,17 @@ def _append_lazy_report_failure_audit_event(*, tenant_id: str, user_id: str, car
     )
 
 
+def _build_lazy_failure_card(card: dict, exc: Exception) -> dict:
+    return {
+        **card,
+        "report_id": None,
+        "dashboard_id": None,
+        "detail_url": None,
+        "report_status": "unavailable",
+        "report_error_code": _lazy_report_failure_error_code(exc),
+    }
+
+
 def _build_contextual_detail_url(*, report_id: str, tenant_id: str, user_id: str) -> str:
     params = urlencode(
         {
@@ -82,7 +93,7 @@ def list_insight_cards(user_id: str, tenant_id: str):
                 card=item,
                 exc=exc,
             )
-            hydrated_items.append(item)
+            hydrated_items.append(_build_lazy_failure_card(item, exc))
             continue
 
         hydrated_items.append(
@@ -95,6 +106,8 @@ def list_insight_cards(user_id: str, tenant_id: str):
                     tenant_id=tenant_id,
                     user_id=user_id,
                 ),
+                "report_status": "ready",
+                "report_error_code": None,
             }
         )
     return {"items": hydrated_items}
@@ -127,6 +140,8 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
                 tenant_id=tenant_id,
                 user_id=user_id,
             ),
+            "report_status": "ready",
+            "report_error_code": None,
         }
         report_summary = {
             "report_id": report["id"],
@@ -141,6 +156,7 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
             card=card,
             exc=exc,
         )
+        card = _build_lazy_failure_card(card, exc)
         report_summary = None
 
     return {"card": card, "report_summary": report_summary}

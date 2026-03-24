@@ -29,3 +29,5 @@ class InsightCard(BaseModel):
     report_id: str | None = None
     dashboard_id: str | None = None
     detail_url: str | None = None
+    report_status: str | None = None
+    report_error_code: str | None = None

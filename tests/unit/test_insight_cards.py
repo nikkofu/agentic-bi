@@ -17,3 +17,5 @@ def test_card_builder_outputs_required_fields():
     assert card["summary"]
     assert card["severity"] == event.severity
     assert card["suggested_next_question"]
+    assert card["report_status"] is None
+    assert card["report_error_code"] is None

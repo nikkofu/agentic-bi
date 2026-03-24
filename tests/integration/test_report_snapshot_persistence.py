@@ -311,6 +311,37 @@ def test_insight_repo_attach_report_and_get_by_card_id(tmp_path, monkeypatch):
         repo.get(card_id=saved["card_id"], allowed_regions=["华南"])
 
 
+def test_insight_repo_returns_explicit_report_state_defaults(tmp_path, monkeypatch):
+    db_path = tmp_path / "insight-linkage-status.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    repo = InsightRepository()
+
+    saved = repo.save_card(
+        {
+            "trace_id": "trace-1",
+            "metric": "gross_margin_rate",
+            "scope": {"region": "华东"},
+            "severity": "P1",
+            "summary": "summary",
+            "attribution": {"key": "华东", "contribution": -0.06},
+            "suggested_next_question": "next",
+        }
+    )
+
+    assert saved["report_status"] is None
+    assert saved["report_error_code"] is None
+
+    repo.attach_report(card_id=saved["card_id"], report_id="dr-9", dashboard_id="dash-9")
+    stored = repo.get(card_id=saved["card_id"], allowed_regions=["华东"])
+
+    assert stored["report_status"] is None
+    assert stored["report_error_code"] is None
+    listed = repo.list_by_regions(["华东"])
+    listed_card = next(card for card in listed if card["card_id"] == saved["card_id"])
+    assert listed_card["report_status"] is None
+    assert listed_card["report_error_code"] is None
+
+
 def test_insight_repo_bootstraps_legacy_table_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "insight-legacy-schema.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
