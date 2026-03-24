@@ -28,4 +28,6 @@ def build_insight_card(*, event: AnomalyEvent, attribution: dict, trace_id: str)
         "report_id": None,
         "dashboard_id": None,
         "detail_url": None,
+        "report_status": None,
+        "report_error_code": None,
     }

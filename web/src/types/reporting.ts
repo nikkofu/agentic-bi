@@ -157,3 +157,19 @@ export interface DiagnosticReportDocument {
   report: DiagnosticReport;
   dashboard: DashboardSpec;
 }
+
+export interface InsightCard {
+  card_id: string;
+  trace_id: string;
+  metric: string;
+  scope: Record<string, JsonValue>;
+  severity: string;
+  summary: string;
+  attribution: Record<string, JsonValue>;
+  suggested_next_question: string;
+  report_id?: string | null;
+  dashboard_id?: string | null;
+  detail_url?: string | null;
+  report_status?: "ready" | "unavailable" | null;
+  report_error_code?: string | null;
+}
