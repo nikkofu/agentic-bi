@@ -463,9 +463,13 @@ def test_insight_card_endpoints_keep_cards_visible_when_lazy_report_creation_fai
     assert listed_card["report_id"] is None
     assert listed_card["dashboard_id"] is None
     assert listed_card["detail_url"] is None
+    assert listed_card["report_status"] == "unavailable"
+    assert listed_card["report_error_code"] == DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
 
     detail_resp = client.get(f"/v1/insights/cards/{seeded_card['card_id']}", params={"tenant_id": "t-1", "user_id": "u-1"})
     assert detail_resp.status_code == 200
     assert detail_resp.json()["card"]["report_id"] is None
     assert detail_resp.json()["card"]["dashboard_id"] is None
+    assert detail_resp.json()["card"]["report_status"] == "unavailable"
+    assert detail_resp.json()["card"]["report_error_code"] == DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED
     assert detail_resp.json()["report_summary"] is None
