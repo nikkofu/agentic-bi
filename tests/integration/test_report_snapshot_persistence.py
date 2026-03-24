@@ -336,6 +336,10 @@ def test_insight_repo_returns_explicit_report_state_defaults(tmp_path, monkeypat
 
     assert stored["report_status"] is None
     assert stored["report_error_code"] is None
+    listed = repo.list_by_regions(["华东"])
+    listed_card = next(card for card in listed if card["card_id"] == saved["card_id"])
+    assert listed_card["report_status"] is None
+    assert listed_card["report_error_code"] is None
 
 
 def test_insight_repo_bootstraps_legacy_table_schema(tmp_path, monkeypatch):
