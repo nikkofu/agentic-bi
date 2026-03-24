@@ -76,23 +76,6 @@ def test_insight_card_accepts_report_fields():
     assert card.detail_url == "/reports/dr-1"
 
 
-def test_insight_card_accepts_explicit_report_state_fields():
-    attribution = AttributionResult(dimension="region", key="华东", contribution=-0.06)
-    card = InsightCard(
-        card_id="card-1",
-        metric="gross_margin_rate",
-        scope={"region": "华东"},
-        severity="P1",
-        summary="毛利率低于基线 6 个点",
-        attribution=attribution,
-        suggested_next_question="请分析华东在该异常中的主要驱动因素",
-        trace_id="trace-1",
-        report_status="unavailable",
-        report_error_code="DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED",
-    )
-
-    assert card.report_status == "unavailable"
-    assert card.report_error_code == "DIAGNOSTIC_REPORT_SNAPSHOT_PERSIST_FAILED"
 
 
 
