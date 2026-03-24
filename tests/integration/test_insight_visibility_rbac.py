@@ -52,6 +52,8 @@ def test_insight_list_only_returns_in_scope_cards_and_exposes_report_links(tmp_p
         == f"/reports/{card['report_id']}?tenant_id=t-1&user_id=u-south&principal_id=u-south"
         for card in body["items"]
     )
+    assert all(card["report_status"] == "ready" for card in body["items"])
+    assert all(card["report_error_code"] is None for card in body["items"])
 
 
 def test_insight_list_returns_no_cards_for_unknown_user_scope(tmp_path, monkeypatch):

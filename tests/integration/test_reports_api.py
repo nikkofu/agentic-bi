@@ -314,6 +314,18 @@ def test_insight_card_detail_returns_report_linkage(tmp_path, monkeypatch):
     assert resp.json()["report_summary"]["report_id"] == report_id
 
 
+def test_insight_card_detail_returns_explicit_ready_report_state(tmp_path, monkeypatch):
+    db_path = tmp_path / "reports-api-card-ready-state.db"
+    monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")
+    card_id, report_id = seed_insight_with_default_report()
+
+    resp = client.get(f"/v1/insights/cards/{card_id}", params={"tenant_id": "t-1", "user_id": "u-1"})
+
+    assert resp.status_code == 200
+    assert resp.json()["card"]["report_status"] == "ready"
+    assert resp.json()["card"]["report_error_code"] is None
+    assert resp.json()["report_summary"]["report_id"] == report_id
+
 def test_insight_reads_fall_back_to_principal_owned_report_when_linked_report_is_inaccessible(tmp_path, monkeypatch):
     db_path = tmp_path / "reports-api-inaccessible-linked-report.db"
     monkeypatch.setenv("AGENTIC_BI_DB_URL", f"sqlite:///{db_path}")

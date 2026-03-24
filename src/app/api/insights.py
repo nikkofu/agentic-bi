@@ -95,6 +95,8 @@ def list_insight_cards(user_id: str, tenant_id: str):
                     tenant_id=tenant_id,
                     user_id=user_id,
                 ),
+                "report_status": "ready",
+                "report_error_code": None,
             }
         )
     return {"items": hydrated_items}
@@ -127,6 +129,8 @@ def get_insight_card(card_id: str, user_id: str, tenant_id: str):
                 tenant_id=tenant_id,
                 user_id=user_id,
             ),
+            "report_status": "ready",
+            "report_error_code": None,
         }
         report_summary = {
             "report_id": report["id"],
